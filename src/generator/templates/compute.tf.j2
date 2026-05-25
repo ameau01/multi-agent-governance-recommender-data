@@ -1,0 +1,73 @@
+{# ============================================================
+   compute.tf.j2 — compute tier resources
+
+   Variables expected:
+     instance_class      e.g. "t3.large"
+     instance_count      integer
+     scaling_policy      "none" | "target_tracking" | "step" | "scheduled"
+     auto_scaling_min    integer | None
+     auto_scaling_max    integer | None
+
+   Emits:
+     - aws_launch_template
+     - aws_autoscaling_group OR fixed count of aws_instance (depends on scaling_policy)
+     - tags: Application + Tier="compute"
+============================================================ #}
+{% if scaling_policy == "none" %}
+{# Fixed-capacity fleet — emit one launch template + N instances #}
+resource "aws_launch_template" "compute" {
+  name_prefix   = "${local.app_name}-compute-"
+  image_id      = "ami-0c55b159cbfafe1f0"   # placeholder Amazon Linux 2
+  instance_type = "{{ instance_class }}"
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(local.common_tags, { Tier = "compute" })
+  }
+}
+
+resource "aws_instance" "compute" {
+  count                  = {{ instance_count }}
+  launch_template {
+    id      = aws_launch_template.compute.id
+    version = "$Latest"
+  }
+  tags = merge(local.common_tags, { Tier = "compute" })
+}
+{% else %}
+{# Auto-scaling group #}
+resource "aws_launch_template" "compute" {
+  name_prefix   = "${local.app_name}-compute-"
+  image_id      = "ami-0c55b159cbfafe1f0"
+  instance_type = "{{ instance_class }}"
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(local.common_tags, { Tier = "compute" })
+  }
+}
+
+resource "aws_autoscaling_group" "compute" {
+  name                = "${local.app_name}-compute-asg"
+  min_size            = {{ auto_scaling_min or instance_count }}
+  max_size            = {{ auto_scaling_max or instance_count }}
+  desired_capacity    = {{ instance_count }}
+  vpc_zone_identifier = ["subnet-placeholder-a", "subnet-placeholder-b"]
+
+  launch_template {
+    id      = aws_launch_template.compute.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Application"
+    value               = local.app_name
+    propagate_at_launch = true
+  }
+  tag {
+    key                 = "Tier"
+    value               = "compute"
+    propagate_at_launch = true
+  }
+}
+{% endif %}

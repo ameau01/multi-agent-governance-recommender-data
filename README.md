@@ -66,10 +66,12 @@ cloud-governance-data-gen/
 ├── README.md                                 # this file
 ├── BUILD_PLAN.md                             # phase-by-phase execution plan
 ├── CHANGELOG.md                              # change history
+├── Makefile                                  # common operations (build / validate / smoke-test / test / lint)
 ├── pyproject.toml                            # Python project metadata + deps
-├── main.py                                   # entry point (placeholder)
+├── main.py                                   # entry point (placeholder — real CLI is `python -m generator.cli`)
 ├── docs/
 │   ├── data-generation-plan.md               # the canonical project plan
+│   ├── execution-guide.md                    # hands-on guide for filling in the skeleton
 │   ├── contract-spec.md                      # synced from agent project (Phase A)
 │   ├── REVIEW_dataset_vs_agent_alignment.md  # alignment review with agent v1.2
 │   └── reference/                            # historical reference materials
@@ -78,11 +80,13 @@ cloud-governance-data-gen/
 ├── prompts/                                  # LLM prompt templates
 │   ├── pass1.txt
 │   └── pass2.txt
-├── src/                                      # implementation lands here (Phase A onward)
-│   ├── contracts/                            # synced from agent project (Phase A)
-│   ├── generator/                            # pass1, pass2, metadata, terraform
-│   └── qa/                                   # qa_validator.py
-├── scenarios/                                # OUTPUT — produced by the pipeline
+├── src/                                      # implementation skeleton — fill in NotImplementedError stubs per Phase A/B
+│   ├── contracts/                            # synced from agent project (Phase A.1)
+│   ├── generator/                            # spec_loader, metadata, terraform, llm_client, pass1, pass2, splitter, pipeline, cli
+│   │   └── templates/                        # per-tier Jinja templates for main.tf rendering
+│   └── qa/                                   # qa_validator, smoke_test
+├── tests/                                    # pytest scaffolding
+├── scenarios/                                # OUTPUT — produced by the pipeline (Phase C)
 │   ├── 01/
 │   ├── ...
 │   └── 18/
@@ -102,6 +106,7 @@ For someone landing on this repo, read in this order:
 | [`README.md`](README.md) (this file) | What the project is and where to find things |
 | [`docs/data-generation-plan.md`](docs/data-generation-plan.md) | The canonical project plan — what we produce and why |
 | [`BUILD_PLAN.md`](BUILD_PLAN.md) | The execution plan — Phase A → B → C, concrete deliverables |
+| [`docs/execution-guide.md`](docs/execution-guide.md) | Hands-on guide to filling in the `src/` skeleton (start here when you sit down to code) |
 | [`docs/contract-spec.md`](docs/contract-spec.md) | The data contract this project produces against (synced from agent project) |
 | [`docs/REVIEW_dataset_vs_agent_alignment.md`](docs/REVIEW_dataset_vs_agent_alignment.md) | History of how the contract evolved across review cycles |
 
@@ -141,11 +146,29 @@ The two projects are coordinated by the shared data contract:
 
 ## Getting started (when implementation begins)
 
+```bash
+git clone <this repo>
+cd cloud-governance-data-gen
+
+# 1. Set up your environment
+cp .env.example .env
+# Edit .env and add your real ANTHROPIC_API_KEY (from console.anthropic.com)
+# Optional: LANGSMITH_API_KEY for tracing (smith.langchain.com)
+
+# 2. Install deps and verify the skeleton
+make install              # uv sync — installs pydantic, jinja2, python-hcl2, pyyaml, anthropic, python-dotenv, langsmith
+make test                 # runs tests/test_skeleton_imports.py — confirms skeleton is intact
+```
+
+`.env` is `gitignore`'d; never commit your real keys. The `.env.example` template documents which variables are needed.
+
+Then:
+
 1. **Receive the contract package** from the agent project (their Phase 1 deliverable) and drop it into `src/contracts/`.
-2. **Read [`BUILD_PLAN.md`](BUILD_PLAN.md)** for the phase plan.
-3. **Phase A** (foundations): metadata generator + Terraform renderer + contract sanity check. No LLM yet.
-4. **Phase B** (pipeline): Pass 1 generator + Pass 2 generator + QA validator. LLM-driven.
-5. **Phase C** (full run + handoff): all 18 scenarios validated and committed under `scenarios/`.
+2. **Read [`BUILD_PLAN.md`](BUILD_PLAN.md)** for the phase plan and [`docs/execution-guide.md`](docs/execution-guide.md) for the hands-on order of operations.
+3. **Phase A** (foundations): fill in `spec_loader.py`, `metadata.py`, `terraform.py`. No LLM yet.
+4. **Phase B** (pipeline): fill in `llm_client.py`, `pass1.py`, `pass2.py`, `splitter.py`, `qa_validator.py`, `pipeline.py`, `smoke_test.py`.
+5. **Phase C** (full run + handoff): `make build-all && make validate-all && make smoke-test`, then commit `scenarios/`.
 
 ---
 

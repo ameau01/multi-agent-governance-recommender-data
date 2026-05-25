@@ -10,22 +10,7 @@ pass adds correlations surgically; if you bake correlations into this pass,
 the next pass cannot reliably preserve your work.
 
 USER:
-Generate Pass 1 (base time-series) for the following cloud governance scenario.
-
-SCENARIO {scenario_id}: {scenario_name}
-Type: {scenario_type}
-Tiers required (emit non-empty arrays for these only): {tiers_required}
-
-BUSINESS CONTEXT:
-{business_context_description}
-SLA: {sla_target_description}
-Criticality: {criticality}
-
-CURRENT CONFIGURATION (informational — drives realism, not directly emitted):
-{tier_topology_description}
-
-PASS 1 METRIC RANGES (this is your job to satisfy):
-{pass1_metrics_block}
+You will generate Pass 1 (base time-series) for a cloud governance scenario.
 
 TIME-PATTERN RULES:
 - Window: 1,344 records per non-empty tier, 15-minute intervals.
@@ -53,7 +38,7 @@ correlations if the scenario calls for them.
 
 OUTPUT SCHEMA (strict):
 {{
-  "scenario_id": "{scenario_id}",
+  "scenario_id": "<from the SCENARIO heading below>",
   "pass": 1,
   "Compute_Metrics": [
     {{
@@ -101,14 +86,33 @@ OUTPUT SCHEMA (strict):
 }}
 
 REQUIREMENTS:
-- For any tier NOT in `tiers_required`, output an empty array `[]`.
+- For any tier NOT in the "Tiers required" list (in the per-scenario section
+  below), output an empty array `[]`.
 - Every non-empty tier array must contain exactly 1,344 records.
 - Timestamps must be exact 15-minute increments from 2026-05-01T00:00:00Z.
 - Timestamps must align index-by-index across all non-empty tier arrays.
-- All numeric values must fall within the ranges stated in PASS 1 METRIC RANGES.
+- All numeric values must fall within the ranges stated in the per-scenario
+  PASS 1 METRIC RANGES section.
 - Use one decimal place for percentages and latencies; integers for counts.
 - For Scenario 5 (Load Balancer Inefficiency) only: emit per-instance compute
   records with `instance_id` populated ("i-001" through "i-N"); the total
   record count becomes 1344 × N instead of 1344.
 
 Output the JSON only. No prose, no markdown, no surrounding text.
+
+<<<CACHE>>>
+
+SCENARIO {scenario_id}: {scenario_name}
+Type: {scenario_type}
+Tiers required (emit non-empty arrays for these only): {tiers_required}
+
+BUSINESS CONTEXT:
+{business_context_description}
+SLA: {sla_target_description}
+Criticality: {criticality}
+
+CURRENT CONFIGURATION (informational — drives realism, not directly emitted):
+{tier_topology_description}
+
+PASS 1 METRIC RANGES (this is your job to satisfy):
+{pass1_metrics_block}

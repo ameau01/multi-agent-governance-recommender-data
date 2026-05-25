@@ -1,0 +1,41 @@
+{# ============================================================
+   network.tf.j2 — network tier resources (load balancer)
+
+   Variables expected:
+     load_balancer_type   "application" | "network"
+     algorithm            "round_robin" | "least_outstanding_requests" | "ip_hash"
+
+   Load-balancer algorithm is set on the target group via
+   load_balancing_algorithm_type — this is what the agent's System Mapper reads
+   for load-balancer scenarios.
+============================================================ #}
+resource "aws_lb" "main" {
+  name               = "${local.app_name}-lb"
+  internal           = false
+  load_balancer_type = "{{ load_balancer_type }}"
+  subnets            = ["subnet-placeholder-a", "subnet-placeholder-b"]
+
+  tags = merge(local.common_tags, { Tier = "network" })
+}
+
+resource "aws_lb_target_group" "main" {
+  name     = "${local.app_name}-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = "vpc-placeholder"
+
+  load_balancing_algorithm_type = "{{ algorithm }}"
+
+  tags = merge(local.common_tags, { Tier = "network" })
+}
+
+resource "aws_lb_listener" "main" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }
+}

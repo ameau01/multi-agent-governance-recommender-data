@@ -1,0 +1,19 @@
+{# ============================================================
+   cache.tf.j2 — cache tier resources
+
+   Variables expected:
+     node_type        e.g. "cache.r6g.large"
+     node_count       integer
+     ttl_seconds      integer | None
+============================================================ #}
+resource "aws_elasticache_cluster" "cache" {
+  cluster_id           = "${local.app_name}-cache"
+  engine               = "redis"
+  node_type            = "{{ node_type }}"
+  num_cache_nodes      = {{ node_count }}
+  parameter_group_name = "default.redis7"
+  engine_version       = "7.0"
+  port                 = 6379
+
+  tags = merge(local.common_tags, { Tier = "cache" })
+}

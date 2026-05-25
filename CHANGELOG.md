@@ -10,6 +10,87 @@ This is a project changelog (planning and implementation milestones), not a rele
 
 Phase A — Foundations work begins here.
 
+### Decided — Model assignments (2026-05-25)
+
+Final model choices for the build, wired into `src/generator/constants.py`:
+
+- **Pass 1**: Claude Sonnet 4.6 — reliable structured output and pattern adherence; fewer Phase B iteration cycles than Haiku.
+- **Pass 2**: Claude Sonnet 4.6 — invariance preservation on large JSON inputs.
+- **Smoke test recommendation**: Claude Opus 4.6 — strongest baseline check available; if Opus can't solve a scenario, the multi-agent system's depth is genuinely needed.
+- **Smoke test LLM-as-judge**: Claude Haiku 4.5 — trivial yes/no comparison.
+
+Estimated cost with prompt caching: ~$157 (over $150 budget by ~$7 — tight).
+Estimated cost with Batch API + prompt caching: ~$79 (recommended path; $70+ headroom).
+
+`BATCH_MODE_ENV_VAR` ("DATAGEN_BATCH_MODE") added to `constants.py` so the
+forthcoming Phase B.6 Batch API code path can be toggled via env var without
+touching the model assignments.
+
+### Added — Batch API skeleton and manual oversight workflow (2026-05-25)
+
+- **Batch API skeleton.** `src/generator/llm_client.py` gained a `BatchSubmitter`
+  class (alongside the existing `LLMClient`) with `enqueue()` and
+  `submit_and_wait()` methods stubbed for Phase B.6 implementation. Same models,
+  same prompts, same parameters as `LLMClient` — therefore the same response
+  quality. Only differences: 50% pricing, asynchronous, 5–30 min wall time.
+- **Phase-level CLI commands.** `src/generator/cli.py` gained `pass1-all`,
+  `pass2-all`, `validate-all`, `smoke-test-all`, plus the existing `build-all`.
+  Each prints a cost + time preview and asks `Proceed? [y/N]` (skip with
+  `--yes`). Each accepts `--batch` to opt into Anthropic Batches API.
+- **`bin/run_oversight.sh`.** Interactive end-to-end walkthrough that runs all
+  four phases with pauses for review. The recommended path for the first full
+  build. Use `bash bin/run_oversight.sh --batch` for Batch API mode.
+- **`bin/run_phase.sh`.** Convenience wrapper to trigger a single phase by name
+  (`bash bin/run_phase.sh pass1 [--batch]`).
+- **Makefile.** New targets: `oversight`, `oversight-batch`, `pass1-all`,
+  `pass2-all`, `validate-all`, `smoke-test-all`, plus `-batch` variants of each.
+- **Docs.** Execution guide's Phase C section updated to describe the supervised
+  workflow as the recommended first-build path.
+
+### Added — Environment + observability scaffolding (2026-05-25, post-skeleton)
+
+- `.env.example` — template documenting the four required/optional env vars:
+  `ANTHROPIC_API_KEY` (required), `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`,
+  `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT`.
+- `src/generator/llm_client.py` now loads `.env` at module import via
+  `python-dotenv`, and constructs the Anthropic client through
+  `_make_anthropic_client()`, which conditionally wraps with
+  `langsmith.wrappers.wrap_anthropic` when `LANGSMITH_TRACING=true`. Wrapping
+  is fully transparent — call sites are unchanged.
+- `src/generator/cli.py` calls `load_dotenv()` at module level as a defensive
+  measure so env vars are populated before any subcommand dispatches.
+- `LLMClient.call()` now accepts an optional `metadata: dict` parameter that
+  is attached to the LangSmith trace for that call (ignored when tracing is off).
+
+### Changed — Dependencies
+
+- Added `python-dotenv>=1.0` for `.env` loading.
+- Added `langsmith>=0.1` for tracing.
+
+### Added — Automatic prompt caching (2026-05-25)
+
+- Prompt templates now use a `SYSTEM:` / `USER:` section structure with optional
+  `<<<CACHE>>>` markers in the USER section to designate cache breakpoints.
+- `prompts/pass1.txt` restructured with one `<<<CACHE>>>` marker after the stable
+  boilerplate (TIME-PATTERN RULES, HEALTHY BASELINES, OUTPUT SCHEMA, REQUIREMENTS).
+  Per-scenario content (SCENARIO / BUSINESS CONTEXT / PASS 1 METRIC RANGES) is in
+  the variable tail.
+- `prompts/pass2.txt` restructured with two `<<<CACHE>>>` markers: after the stable
+  boilerplate and after the Pass 1 JSON input. Per-scenario correlation rules are
+  in the variable tail.
+- `src/generator/llm_client.py` added helpers `_parse_prompt_template`,
+  `_build_message_content`, and `_strip_markdown_fencing`. `LLMClient.call()`
+  automatically parses prompt structure and applies `cache_control: ephemeral`
+  to system + each pre-marker user block.
+- Full caching strategy documented in `docs/internal/generation-methodology.md` §8.
+
+Caching is fully automatic — call sites never touch cache markers. The prompt
+template's structure dictates the layout. Expected savings:
+- Pass 1: ~67% reduction in input cost on the cached portion (boilerplate
+  shared across all 18 scenarios × ~5 chunks each).
+- Pass 2: ~90% reduction in input cost on the Pass 1 JSON portion during
+  within-scenario retries (the dominant cost during Phase B prompt iteration).
+
 ---
 
 ## [0.1.0] — 2026-05-25

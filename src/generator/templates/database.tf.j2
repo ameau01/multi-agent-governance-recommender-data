@@ -1,0 +1,34 @@
+{# ============================================================
+   database.tf.j2 — database tier resources
+
+   Variables expected:
+     instance_class   e.g. "db.r6g.large"
+     replicas         integer (1 = primary only, 2 = primary + 1 read replica, ...)
+     storage_gb       integer | None
+============================================================ #}
+resource "aws_db_instance" "database_primary" {
+  identifier              = "${local.app_name}-db-primary"
+  engine                  = "postgres"
+  engine_version          = "16.1"
+  instance_class          = "{{ instance_class }}"
+  allocated_storage       = {{ storage_gb or 100 }}
+  storage_encrypted       = true
+  skip_final_snapshot     = true
+  username                = "appuser"
+  password                = "placeholder-rotate-in-prod"
+  publicly_accessible     = false
+
+  tags = merge(local.common_tags, { Tier = "database", Role = "primary" })
+}
+
+{% for i in range(replicas - 1) %}
+resource "aws_db_instance" "database_replica_{{ i + 1 }}" {
+  identifier             = "${local.app_name}-db-replica-{{ i + 1 }}"
+  instance_class         = "{{ instance_class }}"
+  replicate_source_db    = aws_db_instance.database_primary.identifier
+  skip_final_snapshot    = true
+  publicly_accessible    = false
+
+  tags = merge(local.common_tags, { Tier = "database", Role = "replica" })
+}
+{% endfor %}

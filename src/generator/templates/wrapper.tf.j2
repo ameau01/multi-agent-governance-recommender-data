@@ -1,0 +1,41 @@
+{# ============================================================
+   wrapper.tf.j2 — top-level scaffolding for main.tf
+   Composes per-tier blocks into a single valid HCL file.
+
+   Variables expected:
+     app_name              "appNN"
+     compute_block         rendered compute.tf.j2 output (str or "")
+     database_block        rendered database.tf.j2 output (str or "")
+     cache_block           rendered cache.tf.j2 output (str or "")
+     network_block         rendered network.tf.j2 output (str or "")
+     security_group_rules  rendered inter-tier rules (str or "")
+
+   See docs/internal/generation-methodology.md §5 for the rendering contract.
+============================================================ #}
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+locals {
+  app_name = "{{ app_name }}"
+  common_tags = {
+    Application = local.app_name
+    ManagedBy   = "data-gen-pipeline"
+  }
+}
+
+{{ compute_block }}
+{{ database_block }}
+{{ cache_block }}
+{{ network_block }}
+{{ security_group_rules }}

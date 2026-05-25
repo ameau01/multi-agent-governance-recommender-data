@@ -169,7 +169,7 @@ A thin wrapper around the Anthropic SDK that:
 - Strips any accidental markdown fencing if the model emits it despite the prompt.
 - Logs the prompt + response to `intermediates/NN/passN_llm_log.json` for debugging.
 
-Model: Claude Haiku for cost; switch to Sonnet if Pass 1/Pass 2 quality is insufficient.
+Model: Sonnet 4.6 for Pass 1 and Pass 2; Opus 4.6 for the smoke test recommendation; Haiku 4.5 for the smoke-test judge. See `src/generator/constants.py` for the wired-up assignments and per-choice rationale, and "Model strategy and cost" below for the budget breakdown.
 
 ### B.2 — Pass 1 generator (Day 4 afternoon)
 
@@ -324,7 +324,7 @@ $ python -m generator.cli build-all
 
 **Expected friction:**
 - Scenarios with multiple correlation rules (08, 09, 10, 13, 17) will need more Pass 2 prompt iteration.
-- Scenario 05 (per-instance records) may need a Pass 1 prompt variant — 10,752 records instead of 1,344 may exceed budget on Haiku; consider Sonnet for this one scenario.
+- Scenario 05 (per-instance records) — 10,752 records vs 1,344 puts this near the output-token ceiling for any single Sonnet call. Likely needs day-chunked generation per `generation-methodology.md` §2 ("Chunking for context-limited models"). Single biggest cost driver of the build.
 - Scenario 17 (diagnostic deferral) has a correlation-without-causation pattern that's subtle; expect 2–3 iteration rounds.
 
 ### C.2 — Sweep validation (Day 10 morning)
@@ -339,7 +339,7 @@ Run the lightweight single-LLM-call smoke test across all 18 scenarios:
 $ python -m qa.smoke_test --all
 ```
 
-Per `docs/internal/scenario-quality-smoke-test.md`: builds a prompt per scenario containing metadata (minus target), telemetry summaries, correlation evidence, and main.tf; asks a single Sonnet call to produce a `TargetRecommendation`; compares against the spec's target on four fields (finding_type, primary_tier, action_category, specific_change).
+Per `docs/internal/scenario-quality-smoke-test.md`: builds a prompt per scenario containing metadata (minus target), telemetry summaries, correlation evidence, and main.tf; asks a single Opus 4.6 call to produce a `TargetRecommendation` (strongest available baseline); compares against the spec's target on four fields (finding_type, primary_tier, action_category, specific_change). The specific_change comparison uses Haiku 4.5 as a one-line LLM-as-judge.
 
 **Expected outcome:** YELLOW or GREEN.
 - ≥14 of 18 pass cleanly → GREEN, proceed.
@@ -348,7 +348,7 @@ Per `docs/internal/scenario-quality-smoke-test.md`: builds a prompt per scenario
 
 Some scenarios are deliberately hard for a single-call LLM — restraint (6, 14, 16, 18), diagnostic deferral (17), SLA review (15), and the harder cross-tier cases. Partial fails on those are expected and acceptable. The smoke test catches *unexpected* fails (e.g., Scenario 01 being unsolvable would indicate a real data problem).
 
-**File:** `src/qa/smoke_test.py` (~150 lines). LLM cost: ~$1 for the full 18-scenario run.
+**File:** `src/qa/smoke_test.py` (~150 lines). LLM cost: ~$1.45 for the full 18-scenario smoke test on Opus 4.6.
 
 ### C.3 — Handoff to agent project (Day 10 afternoon)
 
@@ -372,14 +372,47 @@ All 18 scenarios committed under `scenarios/`. All pass contract and semantic QA
 
 LLM passes are non-deterministic at non-zero temperature. Re-running produces equivalent scenarios (same structure, same patterns) with different specific values. The committed `scenarios/NN/` files are the canonical artifact. Don't re-generate before handoff unless something's broken.
 
-### LLM cost
+### Model strategy and cost
 
-Per-scenario cost estimate (Haiku):
-- Pass 1: ~$0.01 per scenario per call (may chunk; assume 4× for safety).
-- Pass 2: ~$0.005 per scenario per call (skipped entirely for correlation-free scenarios).
-- All 18 scenarios end-to-end: well under $1.
+**Model assignments** (wired up in `src/generator/constants.py`):
 
-Phase B prompt iteration (re-running 1–2 scenarios many times) is the dominant cost driver. Budget $5–10 for the full build.
+| Stage | Model | Why |
+|---|---|---|
+| Pass 1 (telemetry generation) | Sonnet 4.6 | Reliable adherence to ranges, time patterns, 11-of-14 rule. Fewer Phase B iteration cycles than Haiku. |
+| Pass 2 (correlation injection) | Sonnet 4.6 | Pass 2 invariance demands precise rule-following on large JSON. Sonnet is the right tier; Haiku is too risky on invariance. |
+| Smoke test recommendation | Opus 4.6 | Strongest available baseline check — if even Opus can't solve a scenario, the multi-agent system's depth is genuinely needed. Cost is trivial (~$1.45). |
+| Smoke test LLM-as-judge | Haiku 4.5 | One-line "substantively the same change? YES/NO". Trivial reasoning, trivial cost. |
+
+**Per-stage cost breakdown** (with prompt caching enabled — caching is automatic via the prompt template structure; see `docs/internal/generation-methodology.md` §8):
+
+| Stage | Input cost | Output cost | Subtotal |
+|---|---|---|---|
+| Pass 1 (Sonnet, 18 scenarios + ~20 pilot iterations) | ~$0.66 (cached) | ~$100.50 (6.7M tokens × $15/MTok) | **~$101** |
+| Pass 2 (Sonnet, 6 correlation scenarios + ~10 pilot iterations) | ~$3.06 (cached) | ~$51.00 (3.4M tokens × $15/MTok) | **~$54** |
+| Smoke test (Opus, 18 scenarios + ~5 retries) | ~$1.15 | ~$0.30 | **~$1.45** |
+| Smoke test judge (Haiku, 18 calls) | trivial | trivial | **~$0.01** |
+| **Project total** | | | **~$157** |
+
+**Budget against $150 credit.** The above lands ~$7 over the $150 ANTHROPIC credit. **Tight — recommend enabling Batch API.**
+
+**With Batch API** (50% off everything — Phase B.6 deliverable below): project total drops to **~$79**, comfortably under budget with $70+ headroom for unexpected re-runs or extra Phase B iteration.
+
+Output tokens dominate the cost — Pass 1 alone is ~$100 of the budget because each scenario emits ~120K tokens of telemetry JSON. Prompt caching only helps input; it saves ~$8 across the build. Batch API is the dominant lever; recommended path is "Batch + caching." Per-scenario LLM cost reports are logged to `intermediates/NN/passN_llm_log.json` (token counts + cost estimate per call) — track actual against this estimate as the build progresses.
+
+### Phase B.6 — Batch API support (recommended addition)
+
+The 18-scenario build is an asynchronous batch workload by nature, not interactive. Anthropic's Batches API runs the same calls at 50% pricing with up-to-24-hour completion. For our use case, "completion within 30 minutes" is realistic.
+
+Add a code path in `src/generator/pipeline.py` and `src/generator/llm_client.py` that submits to the Batches API when `DATAGEN_BATCH_MODE=true` is set (the env-var name is defined in `constants.py:BATCH_MODE_ENV_VAR`). Behavior:
+
+- Pipeline collects Pass 1 / Pass 2 / smoke-test calls into batches by stage.
+- Submits each batch to Anthropic's batch endpoint.
+- Polls for completion.
+- On completion, applies the same validation + QA logic as the interactive path.
+
+Estimated implementation effort: ~50 lines in `llm_client.py` (a `BatchClient` companion class) + ~30 lines in `pipeline.py` (collect-then-submit orchestration). The existing validation and QA logic is reused unchanged.
+
+**With Batch API enabled, the build runs in ~30 minutes for ~$79.** Without it, the build runs ~5–10 minutes for ~$157 (over budget).
 
 ### Testing strategy
 

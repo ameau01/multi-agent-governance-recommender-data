@@ -14,6 +14,10 @@ dependencies = [
     "pyyaml>=6.0",
     # LLM client for Pass 1 / Pass 2 generation
     "anthropic>=0.39",
+    # Environment configuration
+    "python-dotenv>=1.0",
+    # Observability — auto-traces Anthropic SDK calls when LANGSMITH_TRACING=true
+    "langsmith>=0.1",
 ]
 
 [project.optional-dependencies]
