@@ -185,7 +185,7 @@ After each prompt change, re-run the affected scenarios + the QA validator. Trea
 
 ### Recommended path: supervised oversight run
 
-For the first full build, use the supervised path. It walks through all four phases with a pause after each so you can inspect intermediates and abort if anything looks wrong:
+For the first full build, use the supervised path. It walks through all **five** phases with a pause after each so you can inspect intermediates and abort if anything looks wrong:
 
 ```bash
 make oversight                                   # interactive, ~$157, ~30 min
@@ -194,14 +194,43 @@ make oversight-batch                             # Batch API mode, ~$79, ~65 min
 ```
 
 The script (`bin/run_oversight.sh`) does this for you:
-1. Prints what's about to happen (scenarios + model + cost + time per phase).
-2. Asks "Begin Phase 1?"
-3. Runs Pass 1 across all 18 scenarios with progress lines.
-4. Pauses with review hints (`ls intermediates/*/pass1.json`, `head -50 intermediates/01/pass1.json`).
-5. Asks "Continue to next phase?"
-6. Repeats for Pass 2, Validate, Smoke test.
 
-You can abort between any phase with `n` at the pause prompt. Intermediates are preserved.
+| # | Phase | Model | Cost | Wall time |
+|---|---|---|---|---|
+| 1 | `pass1` — base telemetry generation | Sonnet 4.6 | ~$101 | ~15 min |
+| 2 | `pass2` — cross-tier correlation injection | Sonnet 4.6 | ~$54 | ~8 min |
+| 3 | `validate` — contract + semantic QA | (none) | $0 | ~1 min |
+| 4 | `smoke-test` — Opus recommendation per scenario | Opus 4.6 | ~$1.44 | ~5 min |
+| 5 | `smoke-test-judge` — Haiku judge on saved recommendations | Haiku 4.5 | ~$0.01 | ~1 min |
+
+Between each phase, the script pauses with review hints (`ls intermediates/*/pass1.json`, `head -50 intermediates/01/pass1.json`, etc.) and asks "Continue to next phase?". You can abort cleanly at any pause — intermediates are preserved and the next run resumes from where you stopped.
+
+### Recovery: every phase is resumable
+
+If your Mac sleeps mid-Pass-1 after 12 of 18 scenarios complete, you don't lose those 12. Each per-scenario LLM call writes its output **atomically** to `intermediates/NN/<phase>.json` after the call returns. On the next run:
+
+```bash
+make oversight                                   # (or make resume — same thing)
+# Output during Phase 1 preview:
+#   === Phase: pass1 ===
+#     Model:                claude-sonnet-4-6
+#     Scenarios total:      18
+#     Already complete:     12 (skipped — found valid checkpoint)
+#     Remaining to run:     6
+#     Estimated cost:       ~$33.67    ← pro-rated, NOT the full $101
+#     Estimated time:       ~5 minutes
+#   Proceed? [y/N]:
+```
+
+You only pay for the 6 remaining scenarios. The 12 completed scenarios are loaded from their checkpoint files.
+
+**Why the smoke test is split into two phases (4 and 5).** Phase 4 makes the expensive Opus calls (~$1.44 total). Phase 5 does the cheap Haiku judging (~$0.01). If Phase 5 is interrupted halfway through, you don't waste any Opus money — the saved recommendations from Phase 4 are still on disk and Phase 5 just resumes. You can also abort between 4 and 5 to review Opus's raw recommendations before letting the judge score them.
+
+**Force re-run** (after a contract bump or major prompt change):
+
+```bash
+make pass1-all --force                           # ignores existing checkpoints; re-runs all 18
+```
 
 ### Alternative: per-phase manual control
 
@@ -214,17 +243,41 @@ make pass2-all                                   # Pass 2 (correlation scenarios
 # ... review intermediates/*/pass2.json + scenarios/*/correlation_evidence.json ...
 make validate-all                                # QA layers (no LLM)
 # ... review intermediates/*/qa_report.json ...
-make smoke-test-all                              # Opus baseline + Haiku judge
+make smoke-test-all                              # Opus recommendation per scenario
+# ... inspect intermediates/*/smoke_test.json BEFORE judging ...
+make smoke-test-judge-all                        # Haiku judge on saved recommendations
 # ... review intermediates/smoke_test_summary.md ...
 ```
 
 Each phase command:
-- Prints scenarios + model + estimated cost + estimated time
-- Asks `Proceed? [y/N]`
-- Runs the phase
-- Prints a summary table
+- Scans `intermediates/` and shows N completed + M remaining
+- Prints model + pro-rated cost + pro-rated time for remaining
+- Asks `Proceed? [y/N]` (skip with `--yes`)
+- Writes each scenario's output atomically as it completes
+- Prints a per-scenario summary table at the end
 
-Add `--batch` to any phase to use Anthropic Batches API at 50% cost (~5–30 min async wall time per phase). Add `--yes` to skip the confirmation prompt (useful for unattended runs once you trust the pipeline).
+Flags:
+- `--batch` — use Anthropic Batches API at 50% cost (~5–30 min async wall time per phase)
+- `--yes` — skip the confirmation prompt (useful for unattended runs once you trust the pipeline)
+- `--force` — ignore existing checkpoints; re-run all scenarios from scratch (after a contract bump or major prompt change)
+
+### Per-scenario recovery (when one scenario fails QA or smoke test)
+
+If the smoke test fails for Scenario 13 specifically, you can re-run just that scenario's pipeline:
+
+```bash
+make pass1 SCENARIO=13                           # regenerate Pass 1 for scenario 13
+make pass2 SCENARIO=13                           # then Pass 2
+make validate SCENARIO=13                        # then validate
+make smoke-test SCENARIO=13                      # then smoke test recommendation
+make smoke-test-judge SCENARIO=13                # then judge
+```
+
+Or resume the full pipeline (everything else is already done, only 13 will be re-run):
+
+```bash
+make resume                                      # or just: make oversight
+```
 
 ### Unattended (after you've done one supervised run)
 

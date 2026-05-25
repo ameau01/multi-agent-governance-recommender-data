@@ -47,6 +47,63 @@ touching the model assignments.
 - **Docs.** Execution guide's Phase C section updated to describe the supervised
   workflow as the recommended first-build path.
 
+### Added — Resumable checkpoints + smoke test split (2026-05-25)
+
+Goal: make Mac sleep, Ctrl-C, OOM, or network blips during a paid LLM run
+recoverable without paying twice. Total budget impact on a clean run: zero.
+Cost saving on an interrupted run: pro-rated to whatever fraction completed
+before the interruption.
+
+- **`src/generator/checkpoint.py`** (new, concrete code — not a stub):
+  - `write_json_atomic(path, data)` — tmp-file-and-rename pattern; a partial
+    file is never observable. Cleans up tmp on any interrupt including
+    KeyboardInterrupt.
+  - `write_pydantic_atomic(path, model)` — convenience for Pydantic models.
+  - `is_scenario_complete(scenario_id, phase, ...)` — boolean check with
+    optional Pydantic validation. Corrupt files treated as not-complete.
+  - `partition_scenarios(ids, phase, ...) -> PhasePartition` —
+    `(completed, remaining)` split. Used by every phase command to skip done work.
+  - `checkpoint_path(scenario_id, phase, ...)` / `usage_path(...)` — canonical
+    paths for per-scenario per-phase artifacts.
+- **`src/qa/smoke_test.py`** refactored from one combined function into two
+  separable phases:
+  - **Phase 4: `smoke_test`** — `generate_smoke_test_recommendation()` per
+    scenario, makes the Opus call, saves `SmokeTestRecommendation` to
+    `intermediates/NN/smoke_test.json`. The expensive half (~$1.44 total).
+  - **Phase 5: `smoke_test_judge`** — `judge_smoke_test_recommendation()` per
+    scenario, reads saved recommendation, runs Haiku judge for
+    `specific_change`, writes `SmokeTestJudgeResult` to
+    `intermediates/NN/smoke_test_judge.json`. The cheap half (~$0.01 total).
+  - Plus `*_all()` variants and `build_smoke_test_report()` for aggregation.
+  - Recovery property: if Phase 5 is interrupted, Phase 4's Opus outputs are
+    durable on disk — no Opus re-spending needed on resume.
+- **`src/generator/cli.py`**:
+  - New phase: `smoke-test-judge` (per-scenario) and `smoke-test-judge-all`
+    (across all 18 scenarios).
+  - New `--force` flag on phase-level commands — ignores existing checkpoints
+    and re-runs everything.
+  - `_print_phase_preview()` now shows resume reflection ("Already complete:
+    12, Remaining: 6") and pro-rates cost + time estimates accordingly.
+  - The `_run_phase` stub includes a concrete reference implementation in its
+    `NotImplementedError` message, showing the exact resume pattern callers
+    must follow.
+  - `PHASE_ESTIMATES` extended with checkpoint filenames and `requires_phase`
+    metadata so smoke-test-judge correctly declares its dependency on
+    smoke-test having run first.
+- **`bin/run_oversight.sh`** walks 5 phases instead of 4, with explicit
+  callouts that all phases are resumable. New `--resume` flag for explicit
+  intent (default behavior is the same — phase commands always detect and
+  skip completed scenarios).
+- **`Makefile`** gains `smoke-test-judge`, `smoke-test-judge-all`,
+  `smoke-test-judge-all-batch`, and `resume` targets. The smoke-test-pilots
+  target now also runs the judge.
+- **`docs/execution-guide.md`** updated with the recovery workflow, per-scenario
+  recovery commands, and the 5-phase table.
+
+This is the largest behavioral change so far. Net effect for the user:
+worst-case loss from an interruption is one in-flight scenario, not the full
+phase budget.
+
 ### Added — Environment + observability scaffolding (2026-05-25, post-skeleton)
 
 - `.env.example` — template documenting the four required/optional env vars:
