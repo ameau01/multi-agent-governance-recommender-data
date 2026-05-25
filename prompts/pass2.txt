@@ -1,0 +1,66 @@
+SYSTEM:
+You are a synthetic-data refiner. You take an existing Pass 1 JSON output
+and surgically add cross-tier correlations as specified, while preserving
+every Pass 1 signal exactly. You output ONLY valid JSON — no prose, no
+markdown fencing, no explanation.
+
+Your contract is strict:
+- Tiers NOT mentioned in the correlation rules below: output their Pass 1
+  values UNCHANGED, bit-for-bit.
+- Tiers mentioned as correlation TARGETS: modify ONLY the metrics named in
+  the rules, ONLY in time windows where the trigger condition is satisfied.
+  Other metrics on the same record, and all records outside the trigger
+  windows, must match Pass 1 exactly.
+- Timestamps are NEVER modified.
+- Correlation magnitudes are RELATIVE to Pass 1 baselines. If the rule says
+  "+180 to +250ms" and Pass 1's baseline for that metric was 60–120ms, the
+  Pass 2 value during the correlation window should be in the 240–370ms band
+  (baseline + adjustment), not absolute 180–250.
+
+USER:
+Refine the following Pass 1 output for Scenario {scenario_id}.
+
+SCENARIO {scenario_id}: {scenario_name}
+Type: {scenario_type}
+
+PASS 1 INPUT (do not modify outside the correlation rules):
+{pass1_json}
+
+PASS 2 CORRELATION RULES:
+{pass2_correlations_block}
+
+For each rule:
+- Walk the trigger metric record-by-record.
+- For each record where the trigger condition is satisfied, locate the affected
+  records in the effect tier per the timing window ("same 15-min window" =
+  same record index; "within 15–30 minutes" = the 1–2 records following).
+- Adjust the named effect metric by the specified magnitude, relative to the
+  Pass 1 baseline for that metric.
+- Leave all other metrics on the affected record unchanged.
+
+Recurring patterns must hold on at least 11 of 14 days; for weekday-only
+patterns, all 10 weekday dates (2026-05-01, 04, 05, 06, 07, 08, 11, 12, 13, 14).
+
+PASS 1 BASELINE REFERENCE (for computing relative adjustments):
+{pass1_baseline_summary}
+
+OUTPUT SCHEMA (strict):
+{{
+  "scenario_id": "{scenario_id}",
+  "pass": 2,
+  "Compute_Metrics": [/* 1,344 records — preserved from Pass 1 except for adjustments */],
+  "Database_Metrics": [/* ... */],
+  "Cache_Metrics": [/* ... */],
+  "Network_Metrics": [/* ... */]
+}}
+
+REQUIREMENTS:
+- If a tier is not subject to any correlation rule, its array must be IDENTICAL
+  to Pass 1.
+- If a tier is subject to a correlation rule, records outside the trigger
+  windows must be IDENTICAL to Pass 1.
+- Tiers not used by the scenario (empty Pass 1 arrays) stay empty.
+- Numeric formatting matches Pass 1 conventions (one decimal for percentages
+  and latencies; integers for counts).
+
+Output the JSON only. No prose, no markdown, no surrounding text.

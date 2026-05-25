@@ -1,0 +1,73 @@
+# ============================================================
+# Internal working materials — never checked into the public repo
+# ============================================================
+# Scenario specs, healthy baselines, generation methodology,
+# generation conventions, and generation-side QA notes are
+# data-gen-internal artifacts. They drive the pipeline but are
+# not part of the public deliverable.
+docs/internal/
+
+# ============================================================
+# Pipeline intermediates — debug-only, not the deliverable
+# ============================================================
+# Raw Pass 1 / Pass 2 JSON outputs are kept locally for
+# debugging across runs but are not checked in.
+intermediates/
+
+# ============================================================
+# Python
+# ============================================================
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.secret
+
+# uv / poetry / pip
+.uv-cache/
+
+# ============================================================
+# IDE / editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+
+# ============================================================
+# Project workspace metadata
+# ============================================================
+.workspace/
