@@ -270,6 +270,12 @@ Implements every check in [`docs/internal/generation-qa.md`](docs/internal/gener
 
 A scenario folder is **only committed to `scenarios/NN/` when both layers pass**.
 
+### B.5.5 — Smoke-test the two pilot scenarios (Day 6, after QA)
+
+After Scenarios 01 and 07 pass the QA validator, run the scenario-quality smoke test on them as an early sanity check (full smoke test of all 18 happens in Phase C). Confirms the pipeline produces solvable scenarios before scaling to all 18.
+
+See `docs/internal/scenario-quality-smoke-test.md` for the procedure.
+
 ### B.6 — End-to-end on 2 scenarios (Day 7)
 
 Run the full pipeline on Scenarios **01** (single-tier, simplest) and **07** (cross-tier with correlations, most representative).
@@ -325,6 +331,25 @@ $ python -m generator.cli build-all
 
 Run the QA validator across all 18 scenarios in batch. Generate an aggregate report. Investigate any scenarios that pass the validator but look weird on manual inspection.
 
+### C.2.5 — Scenario-quality smoke test (Day 10 morning)
+
+Run the lightweight single-LLM-call smoke test across all 18 scenarios:
+
+```bash
+$ python -m qa.smoke_test --all
+```
+
+Per `docs/internal/scenario-quality-smoke-test.md`: builds a prompt per scenario containing metadata (minus target), telemetry summaries, correlation evidence, and main.tf; asks a single Sonnet call to produce a `TargetRecommendation`; compares against the spec's target on four fields (finding_type, primary_tier, action_category, specific_change).
+
+**Expected outcome:** YELLOW or GREEN.
+- ≥14 of 18 pass cleanly → GREEN, proceed.
+- 12–13 pass → YELLOW, spot-check the failures.
+- ≤11 pass → RED, investigate data quality.
+
+Some scenarios are deliberately hard for a single-call LLM — restraint (6, 14, 16, 18), diagnostic deferral (17), SLA review (15), and the harder cross-tier cases. Partial fails on those are expected and acceptable. The smoke test catches *unexpected* fails (e.g., Scenario 01 being unsolvable would indicate a real data problem).
+
+**File:** `src/qa/smoke_test.py` (~150 lines). LLM cost: ~$1 for the full 18-scenario run.
+
 ### C.3 — Handoff to agent project (Day 10 afternoon)
 
 - Push the 18 scenario folders to the shared repo / handoff package the agent project expects.
@@ -333,7 +358,7 @@ Run the QA validator across all 18 scenarios in batch. Generate an aggregate rep
 
 ### Phase C exit criterion
 
-All 18 scenarios committed under `scenarios/`. All pass contract and semantic QA. Agent project's Input Harness accepts each one without rejection.
+All 18 scenarios committed under `scenarios/`. All pass contract and semantic QA. Smoke test result is GREEN (≥14 pass) or YELLOW (12–13 pass with documented exceptions for hard scenarios). Agent project's Input Harness accepts each one without rejection.
 
 ---
 

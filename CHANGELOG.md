@@ -33,7 +33,8 @@ These are working materials for the pipeline. Per `.gitignore`, they are not par
 - `docs/internal/healthy-baselines.md` — per-metric healthy ranges for every field in the v1.2 schema, time-pattern conventions, negative-scenario deviation guidance.
 - `docs/internal/generation-methodology.md` — Pass 1 / Pass 2 / metadata / Terraform / QA pipeline mechanics.
 - `docs/internal/generation-conventions.md` — field semantics (TopQuery.count time unit, etc.), data-window constants, SLA derivation rule.
-- `docs/internal/generation-qa.md` — semantic QA checks beyond the contract's structural validation.
+- `docs/internal/generation-qa.md` — semantic QA checks beyond the contract's structural validation ("did we generate what we specified").
+- `docs/internal/scenario-quality-smoke-test.md` — lightweight pre-handoff QA check that runs each scenario through a single LLM call and verifies the data is sufficient to reach the target recommendation ("are the scenarios solvable").
 - `docs/internal/scenarios/01.spec.yaml` through `18.spec.yaml` — the 18 per-scenario specifications, re-derived from the v3 dataset doc §6 into the v1.2 contract field set.
 
 ### Added — Prompt scaffolds

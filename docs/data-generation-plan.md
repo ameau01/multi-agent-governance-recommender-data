@@ -220,10 +220,11 @@ The data-generation work is sequenced in three phases, paired with the agent pro
 
 - Run the full pipeline against all 18 scenarios.
 - Each scenario folder validated by contract + semantic QA before being accepted.
+- Run the **scenario-quality smoke test** as a final gate before handoff — a single-LLM-call sanity check that the generated data is sufficient for a baseline LLM to reach the target recommendation. See `docs/internal/scenario-quality-smoke-test.md`. Expected pass rate: 12–14 of 18 (some scenarios are deliberately hard for a single-call baseline).
 - Hand 18 scenarios to the agent project for ingestion testing.
 - Iterate as the agent project's Input Harness surfaces any edge cases.
 
-End of Phase C: 18 scenarios in `scenarios/01/` through `scenarios/18/`, all passing contract and semantic QA, ready for agent ingestion.
+End of Phase C: 18 scenarios in `scenarios/01/` through `scenarios/18/`, all passing contract and semantic QA, smoke test green or yellow with documented exceptions, ready for agent ingestion.
 
 ---
 
@@ -320,7 +321,8 @@ Everything else is internal.
 | What "healthy" means per metric | `docs/internal/healthy-baselines.md` |
 | How Pass 1 / Pass 2 / metadata / Terraform generation work | `docs/internal/generation-methodology.md` |
 | Field-semantics conventions and other generation rules | `docs/internal/generation-conventions.md` |
-| Generation-side QA checks beyond contract validation | `docs/internal/generation-qa.md` |
+| Generation-side QA checks (data matches spec) | `docs/internal/generation-qa.md` |
+| Scenario-quality smoke test (single-LLM solvability check) | `docs/internal/scenario-quality-smoke-test.md` |
 | Per-scenario specs (narrative + ranges + correlations + target) | `docs/internal/scenarios/NN.spec.yaml` |
 | Pass 1 / Pass 2 LLM prompt templates | `prompts/pass1.txt`, `prompts/pass2.txt` |
 
