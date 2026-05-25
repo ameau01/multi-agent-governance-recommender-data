@@ -183,15 +183,61 @@ After each prompt change, re-run the affected scenarios + the QA validator. Trea
 
 **Goal:** run the full pipeline against all 18 scenarios, validate the bunch, hand off to the agent project.
 
-### Recommended path: supervised oversight run
+### Recommended path: per-phase numbered scripts
 
-For the first full build, use the supervised path. It walks through all **five** phases with a pause after each so you can inspect intermediates and abort if anything looks wrong:
+You trigger each of the five phases yourself, one script per phase. After each, you inspect intermediates and decide whether to run the next. Each script is **resumable** — if your Mac sleeps or something crashes, just re-run the same script and it skips completed scenarios.
 
 ```bash
-make oversight                                   # interactive, ~$157, ~30 min
-# or
-make oversight-batch                             # Batch API mode, ~$79, ~65 min
+bin/01_pass1.sh                                  # Phase 1: Sonnet base telemetry      (~$101 / ~15 min)
+# ... review intermediates/*/pass1.json ...
+
+bin/02_pass2.sh                                  # Phase 2: Sonnet correlation injection (~$54 / ~8 min)
+# ... review intermediates/*/pass2.json + scenarios/*/correlation_evidence.json ...
+
+bin/03_validate.sh                               # Phase 3: QA validation (no LLM, ~1 min)
+# ... review intermediates/*/qa_report.json ...
+
+bin/04_smoke_test.sh                             # Phase 4: Opus recommendation per scenario (~$1.44 / ~5 min)
+# ... inspect intermediates/*/smoke_test.json BEFORE judging ...
+
+bin/05_smoke_test_judge.sh                       # Phase 5: Haiku judge on saved recommendations (~$0.01 / ~1 min)
+# ... review intermediates/smoke_test_summary.md ...
 ```
+
+Or via Makefile shortcuts:
+
+```bash
+make 01-pass1
+make 02-pass2
+make 03-validate
+make 04-smoke-test
+make 05-smoke-test-judge
+```
+
+Each script:
+1. Prints a banner showing model + scenarios + cost + time.
+2. Invokes the CLI which scans `intermediates/` for valid checkpoints and shows N completed (skipped) + M remaining (will be billed).
+3. Asks `Proceed? [y/N]` (skip with `--yes`).
+4. Runs the phase, atomically checkpointing each scenario as it completes.
+5. Prints per-scenario summary + review hints + the next script to run.
+
+### Flags (consistent across all five scripts)
+
+| Flag | Purpose |
+|---|---|
+| `--batch` | Use Anthropic Batches API at 50% cost (~5–30 min async wall time) |
+| `--yes` | Skip the confirmation prompt (unattended runs) |
+| `--force` | Ignore existing checkpoints; re-run every scenario (after contract bump or major prompt change) |
+
+Via Make:
+```bash
+make 01-pass1 FLAGS="--batch --yes"
+make 04-smoke-test FLAGS="--batch"
+```
+
+### Alternative: all-in-one walk-through
+
+If you prefer one command that walks all five phases sequentially with pauses between (the original oversight pattern), `make oversight` and `make oversight-batch` still work and call the same underlying CLI commands.
 
 The script (`bin/run_oversight.sh`) does this for you:
 

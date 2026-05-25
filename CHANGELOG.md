@@ -104,6 +104,32 @@ This is the largest behavioral change so far. Net effect for the user:
 worst-case loss from an interruption is one in-flight scenario, not the full
 phase budget.
 
+### Restructured — Numbered per-phase scripts (2026-05-25)
+
+The combined `bin/run_oversight.sh` walk-through was split into five
+standalone per-phase scripts. The combined script still exists as an
+optional all-in-one alternative. New numbered scripts (the primary path):
+
+- `bin/01_pass1.sh` — Phase 1: Sonnet base telemetry generation
+- `bin/02_pass2.sh` — Phase 2: Sonnet cross-tier correlation injection
+- `bin/03_validate.sh` — Phase 3: QA validation (no LLM)
+- `bin/04_smoke_test.sh` — Phase 4: Opus recommendation per scenario
+- `bin/05_smoke_test_judge.sh` — Phase 5: Haiku judge on saved recommendations
+
+Each script:
+- Prints a banner with model + scenarios + cost + time + resume note.
+- Wraps the corresponding `python -m generator.cli <phase>-all` invocation.
+- Accepts the same `--batch`, `--yes`, `--force` flags as the CLI.
+- Prints review hints (specific commands to run) after the phase completes.
+- Points to the next script.
+
+Makefile shortcuts: `make 01-pass1` through `make 05-smoke-test-judge`,
+each accepting `FLAGS="..."` to pass flags through.
+
+Deprecated: `bin/run_phase.sh` (the generic single-phase wrapper). It now
+prints a deprecation notice and exits non-zero. Safe to delete with
+`rm bin/run_phase.sh` from your terminal.
+
 ### Added — Environment + observability scaffolding (2026-05-25, post-skeleton)
 
 - `.env.example` — template documenting the four required/optional env vars:

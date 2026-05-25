@@ -2,20 +2,32 @@
 # ----------------------------------------------------------
 # Quick reference (organized by use case):
 #
-# SUPERVISED FULL RUN (recommended for first build):
-#   make oversight                Interactive walk-through of all 5 phases (RESUMABLE)
-#   make oversight-batch          Same, but via Anthropic Batches API (50% cost)
-#   make resume                   Same as oversight — continues from where prior run stopped
+# PRIMARY PATH — Numbered per-phase scripts (RESUMABLE, manually triggered):
 #
-# PER-PHASE (manual control, RESUMABLE — re-running skips completed scenarios):
-#   make pass1-all                Pass 1: Sonnet base telemetry (~$101 / $50 batch)
-#   make pass2-all                Pass 2: Sonnet correlation injection (~$54 / $27 batch)
-#   make validate-all             QA validator (no LLM)
-#   make smoke-test-all           Opus recommendation per scenario (~$1.44 / $0.72 batch)
-#   make smoke-test-judge-all     Haiku judge on saved recommendations (~$0.01)
+#   make 01-pass1                 Phase 1: Sonnet base telemetry (~$101 / $50 batch)
+#   make 02-pass2                 Phase 2: Sonnet correlation injection (~$54 / $27 batch)
+#   make 03-validate              Phase 3: QA validator (no LLM)
+#   make 04-smoke-test            Phase 4: Opus recommendation (~$1.44 / $0.72 batch)
+#   make 05-smoke-test-judge      Phase 5: Haiku judge on saved recommendations (~$0.01)
 #
-#   Each of the above prints a cost preview that shows N completed (skipped)
-#   and M remaining (will be billed). Add --force on the CLI to re-run all.
+#   Run them in order, one at a time. Each script prints a banner, runs the
+#   CLI with cost preview + confirmation, then shows review hints at the end.
+#   All RESUMABLE — re-running a phase after an interrupt skips completed
+#   scenarios and pays only for the rest.
+#
+#   Each script accepts --batch, --yes, --force flags. Pass with FLAGS=:
+#       make 01-pass1 FLAGS="--batch --yes"
+#
+# ALTERNATIVE (all-in-one walk-through):
+#   make oversight                Walk through all 5 phases with pauses between
+#   make oversight-batch          Same, but with Batch API enabled
+#
+# RAW CLI (skip the bash wrappers):
+#   make pass1-all                Same as bin/01_pass1.sh but no banner/review hints
+#   make pass2-all                Same as bin/02_pass2.sh
+#   make validate-all             Same as bin/03_validate.sh
+#   make smoke-test-all           Same as bin/04_smoke_test.sh
+#   make smoke-test-judge-all     Same as bin/05_smoke_test_judge.sh
 #
 # PER-SCENARIO (debugging / pilots):
 #   make build SCENARIO=07            Build one scenario end-to-end
@@ -32,6 +44,7 @@
 #   make clean                        remove intermediates/ (debug-only output)
 
 .PHONY: install \
+        01-pass1 02-pass2 03-validate 04-smoke-test 05-smoke-test-judge \
         build build-all build-metadata build-terraform pass1 pass2 \
         smoke-test smoke-test-judge validate \
         pass1-all pass2-all smoke-test-all smoke-test-judge-all validate-all \
@@ -51,7 +64,29 @@ install:
 	@echo "✓ Dependencies installed."
 
 # ----------------------------------------------------------
-# Supervised full run (recommended path — wraps bin/run_oversight.sh)
+# Primary path — Numbered per-phase scripts (RESUMABLE)
+# Each script: banner + CLI (cost preview + confirmation) + review hints.
+# Pass flags via FLAGS=:  make 01-pass1 FLAGS="--batch --yes"
+# ----------------------------------------------------------
+FLAGS ?=
+
+01-pass1:
+	@bash bin/01_pass1.sh $(FLAGS)
+
+02-pass2:
+	@bash bin/02_pass2.sh $(FLAGS)
+
+03-validate:
+	@bash bin/03_validate.sh $(FLAGS)
+
+04-smoke-test:
+	@bash bin/04_smoke_test.sh $(FLAGS)
+
+05-smoke-test-judge:
+	@bash bin/05_smoke_test_judge.sh $(FLAGS)
+
+# ----------------------------------------------------------
+# Alternative — All-in-one walk-through (legacy, optional)
 # ----------------------------------------------------------
 oversight:
 	@bash bin/run_oversight.sh
