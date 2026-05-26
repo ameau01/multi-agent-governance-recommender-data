@@ -316,3 +316,192 @@ def partition_chunks(
         else:
             remaining.append(day_index)
     return ChunkPartition(tier=tier, completed=completed, remaining=remaining)
+
+
+# ============================================================
+# Pass 2 window-based checkpoints (with provenance stamping for G9)
+# ============================================================
+#
+# A "window checkpoint" stores the modified records for ONE work item.
+# Each window file has a sidecar `.stamp.json` that records the exact
+# provenance: Pass 1 content hash, rule index, prompt content hash, and
+# the work item's trigger span.
+#
+# Resume rules: a checkpoint is reused ONLY if its stamp matches the
+# current plan's stamp values for that work item. Any mismatch causes
+# the chunk to be re-generated, never silently consumed. This eliminates
+# the "you re-ran Pass 1 and Pass 2 silently used stale chunks" failure
+# mode that would otherwise be invisible.
+#
+# File layout per scenario:
+#   intermediates/NN/pass2_window_<work_id>.json          ← the modified records
+#   intermediates/NN/pass2_window_<work_id>.stamp.json    ← provenance sidecar
+#   intermediates/NN/pass2_window_<work_id>_llm_log.json  ← per-window LLM log
+#   intermediates/NN/pass2_plan.json                      ← Phase 2A output
+#   intermediates/NN/pass2_verification.json              ← Phase 2 verification (G10)
+#   intermediates/NN/pass2.json                           ← final merged Pass 2 (Phase 2C)
+
+
+def window_checkpoint_path(
+    scenario_id: str,
+    work_id: str,
+    intermediates_dir: Path,
+) -> Path:
+    """Path for one window's modified-records checkpoint."""
+    return intermediates_dir / scenario_id / f"pass2_window_{work_id}.json"
+
+
+def window_stamp_path(
+    scenario_id: str,
+    work_id: str,
+    intermediates_dir: Path,
+) -> Path:
+    """Path for one window's provenance sidecar."""
+    return intermediates_dir / scenario_id / f"pass2_window_{work_id}.stamp.json"
+
+
+def window_llm_log_path(
+    scenario_id: str,
+    work_id: str,
+    intermediates_dir: Path,
+) -> Path:
+    """Path for one window's LLM call log (multi-turn agent loop)."""
+    return intermediates_dir / scenario_id / f"pass2_window_{work_id}_llm_log.json"
+
+
+@dataclass(frozen=True)
+class WindowStamp:
+    """Provenance fields stamped onto each Pass 2 window checkpoint.
+
+    All four fields must match between the stamp and the current run for
+    the checkpoint to be reused. Otherwise the window is regenerated.
+    """
+
+    pass1_sha256: str                    # Pass 1 content hash (first 16 chars enough)
+    rule_index: int                      # which rule in spec.pass2_correlations
+    prompt_sha256: str                   # prompts/pass2.txt content hash
+    trigger_start_iso: str               # window's first trigger timestamp
+    trigger_end_iso: str                 # window's last trigger timestamp
+
+
+def write_window_stamp(
+    path: Path, stamp: WindowStamp,
+) -> None:
+    """Atomic write of a window's provenance stamp."""
+    write_json_atomic(
+        path,
+        {
+            "pass1_sha256": stamp.pass1_sha256,
+            "rule_index": stamp.rule_index,
+            "prompt_sha256": stamp.prompt_sha256,
+            "trigger_start_iso": stamp.trigger_start_iso,
+            "trigger_end_iso": stamp.trigger_end_iso,
+        },
+        indent=2,
+    )
+
+
+def read_window_stamp(path: Path) -> WindowStamp | None:
+    """Read a window's provenance stamp, or return None if missing/corrupt."""
+    if not path.exists():
+        return None
+    try:
+        data = read_json(path)
+        return WindowStamp(
+            pass1_sha256=data["pass1_sha256"],
+            rule_index=int(data["rule_index"]),
+            prompt_sha256=data["prompt_sha256"],
+            trigger_start_iso=data["trigger_start_iso"],
+            trigger_end_iso=data["trigger_end_iso"],
+        )
+    except (json.JSONDecodeError, KeyError, OSError, ValueError):
+        return None
+
+
+def window_checkpoint_valid(
+    scenario_id: str,
+    work_id: str,
+    expected_stamp: WindowStamp,
+    intermediates_dir: Path,
+) -> bool:
+    """A window checkpoint is reusable iff:
+       - The records file exists and is non-empty valid JSON.
+       - The stamp file exists.
+       - The stamp matches `expected_stamp` on all four fields.
+    """
+    records_path = window_checkpoint_path(scenario_id, work_id, intermediates_dir)
+    if not records_path.exists() or records_path.stat().st_size == 0:
+        return False
+    try:
+        read_json(records_path)
+    except json.JSONDecodeError:
+        return False
+    stamp_path = window_stamp_path(scenario_id, work_id, intermediates_dir)
+    actual = read_window_stamp(stamp_path)
+    if actual is None:
+        return False
+    return (
+        actual.pass1_sha256 == expected_stamp.pass1_sha256
+        and actual.rule_index == expected_stamp.rule_index
+        and actual.prompt_sha256 == expected_stamp.prompt_sha256
+        and actual.trigger_start_iso == expected_stamp.trigger_start_iso
+        and actual.trigger_end_iso == expected_stamp.trigger_end_iso
+    )
+
+
+@dataclass(frozen=True)
+class WindowPartition:
+    """Partition of a scenario's work_ids into (completed, remaining)."""
+
+    completed: list[str]
+    remaining: list[str]
+
+    @property
+    def total(self) -> int:
+        return len(self.completed) + len(self.remaining)
+
+    @property
+    def all_complete(self) -> bool:
+        return len(self.remaining) == 0
+
+
+def partition_windows(
+    scenario_id: str,
+    work_ids: list[str],
+    expected_stamps: dict[str, WindowStamp],
+    intermediates_dir: Path,
+) -> WindowPartition:
+    """For a scenario's work plan, classify each work_id as completed or remaining.
+
+    A work_id is `completed` iff its checkpoint exists AND its stamp matches
+    the expected provenance. Any mismatch / missing file → `remaining`.
+    """
+    completed: list[str] = []
+    remaining: list[str] = []
+    for wid in work_ids:
+        stamp = expected_stamps.get(wid)
+        if stamp is None:
+            remaining.append(wid)
+            continue
+        if window_checkpoint_valid(scenario_id, wid, stamp, intermediates_dir):
+            completed.append(wid)
+        else:
+            remaining.append(wid)
+    return WindowPartition(completed=completed, remaining=remaining)
+
+
+# ============================================================
+# Generic content hashing — used for provenance
+# ============================================================
+def sha256_bytes_hex(data: bytes, *, length: int = 16) -> str:
+    """Short SHA-256 hex digest (default 16 chars) for stamping checkpoints.
+
+    16 hex chars = 64 bits of entropy = collision-safe for our scale.
+    """
+    import hashlib
+    return hashlib.sha256(data).hexdigest()[:length]
+
+
+def sha256_file_hex(path: Path, *, length: int = 16) -> str:
+    """Short SHA-256 of a file's content."""
+    return sha256_bytes_hex(path.read_bytes(), length=length)

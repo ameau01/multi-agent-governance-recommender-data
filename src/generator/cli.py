@@ -226,19 +226,11 @@ def _run_phase(phase: str, args: argparse.Namespace) -> int:
     from generator.types import Pass1Output, Pass2Output
     from qa.qa_validator_types import QAReport
 
-    # Determine scenarios in scope for this phase
-    if phase == "pass2":
-        # Only correlation scenarios use Pass 2
-        try:
-            scenario_ids = [
-                sid for sid in ALL_SCENARIO_IDS
-                if load_spec(sid).pass2_correlations
-            ]
-        except Exception as e:
-            print(f"ERROR loading specs to determine Pass 2 scope: {e}")
-            return 2
-    else:
-        scenario_ids = list(ALL_SCENARIO_IDS)
+    # Determine scenarios in scope for this phase. Every phase runs across
+    # ALL scenarios — Pass 2 used to filter to correlation scenarios only,
+    # but that hardcoded skip hid the LLM call from non-correlation scenarios
+    # and prevented uniform validation of the Pass 2 pipeline.
+    scenario_ids = list(ALL_SCENARIO_IDS)
 
     # Phase → (checkpoint_phase_name, model_cls_for_validation, runner_fn)
     if phase == "pass1":

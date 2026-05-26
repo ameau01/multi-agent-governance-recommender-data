@@ -114,7 +114,15 @@ def generate_smoke_test_recommendation(
     *,
     intermediates_dir: Path | None = None,
 ) -> SmokeTestRecommendation:
-    """Run Phase 4 for one scenario: call Opus, parse, return."""
+    """Run Phase 4 for one scenario: call Opus, parse, return.
+
+    Auto-builds the two cheap, deterministic upstream artifacts
+    (metadata.json and main.tf) if they're missing from the scenario
+    folder — neither costs an LLM call, and the smoke test prompt
+    cannot be assembled without them. This keeps the user from having
+    to remember to run `build-metadata` and `build-terraform`
+    separately before every smoke-test run.
+    """
     scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
     intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
     scenario_dir = scenarios_dir / scenario_id
@@ -123,6 +131,10 @@ def generate_smoke_test_recommendation(
             f"Scenario folder not found: {scenario_dir}. "
             f"Run Phases 1-3 for {scenario_id} first."
         )
+
+    # Prestep — build metadata.json + main.tf if missing.
+    # No-op when both files already exist.
+    _ensure_metadata_and_terraform(scenario_id, scenarios_dir)
 
     prompt = _build_smoke_test_prompt(scenario_dir)
     client = LLMClient(model=SMOKE_TEST_MODEL, max_tokens=SMOKE_TEST_MAX_TOKENS, temperature=0.2)
@@ -334,6 +346,45 @@ def build_smoke_test_report(
 # ============================================================
 # Helpers
 # ============================================================
+def _ensure_metadata_and_terraform(
+    scenario_id: str, scenarios_dir: Path,
+) -> None:
+    """Build scenarios/NN/metadata.json and main.tf if missing.
+
+    Both are produced by deterministic, no-LLM builders
+    (generator.metadata + generator.terraform) and are
+    prerequisites for the smoke-test prompt. Building them on
+    demand here means callers (CLI per-scenario, CLI -all,
+    programmatic) never have to remember the prestep.
+
+    No-op when both files already exist on disk — this keeps the
+    fast path fast on re-runs and avoids any risk of clobbering
+    a hand-edited file the user wants to preserve.
+    """
+    scenario_dir = scenarios_dir / scenario_id
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = scenario_dir / "metadata.json"
+    terraform_path = scenario_dir / "main.tf"
+    if metadata_path.exists() and terraform_path.exists():
+        return
+
+    # Lazy import — keeps the smoke-test module importable even
+    # if someone is unit-testing it without the generator package.
+    from generator import metadata as metadata_module
+    from generator import terraform as terraform_module
+
+    spec = load_spec(scenario_id)
+    meta = metadata_module.build_metadata(spec)
+
+    if not metadata_path.exists():
+        metadata_module.write_metadata(meta, scenario_dir)
+    if not terraform_path.exists():
+        hcl = terraform_module.render_terraform(meta)
+        terraform_module.validate_terraform(hcl, meta)
+        terraform_module.write_terraform(hcl, scenario_dir)
+
+
 def _build_smoke_test_prompt(scenario_dir: Path) -> str:
     """Bundle metadata (target_recommendation + evaluation_properties stripped),
     telemetry summaries (NOT raw records), correlation_evidence, and main.tf.

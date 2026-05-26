@@ -1,0 +1,82 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "01",
+  "scenario_name": "Chronic Underutilization",
+  "scenario_type": "single_tier_negative",
+  "generated_at": "2026-05-26T06:03:35.999486Z",
+  "narrative": {
+    "what_this_demonstrates": "A compute fleet that has been systematically over-provisioned: utilization is far below healthy across all 14 days with no spikes, no business-hours variation, and no SLA pressure. The right action is straightforward rightsizing.\n",
+    "why_this_scenario_exists": "Tests the Compute Analyst's ability to identify a single-tier issue cleanly, ground the specific change in evidence, and avoid recommending aggressive multi-tier action when the data does not justify it.\n",
+    "what_the_agent_should_conclude": "Switch instance class from t3.large to t3.medium and reduce minimum replica count from 8 to 4. Expected savings ~62% on monthly compute cost (~$2,850/month) with no SLA impact.\n",
+    "what_distinguishes_good_from_great": "A good recommendation says \"downsize compute.\" A great recommendation grounds the specific from\u2192to change in before/after evidence and quotes the expected savings precisely.\n"
+  },
+  "business_context": {
+    "description": "Medium-criticality internal service",
+    "sla_target_description": "99.5% availability, P95 < 500ms",
+    "sla_target_p95_ms": 500,
+    "sla_target_availability_pct": 99.5,
+    "criticality": "tier-2"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 4600.0,
+    "by_tier": {
+      "compute": 4600.0,
+      "database": 0.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "t3.large",
+      "instance_count": 8,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": null,
+    "cache": null,
+    "network": null
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "t3.large \u00d7 8 fixed, no scaling",
+    "config_after": "t3.medium \u00d7 4 fixed, no scaling",
+    "observed_outcome_summary": "CPU p50 stayed in the 12\u201322% range, application_p95_latency_ms held at 80\u2013140ms, SLA preserved at 99.5%, monthly compute cost dropped 62% (~$2,850 saved).\n",
+    "source_attribution": "Pattern observed across internal-services cohort during Q4 2025."
+  },
+  "target_recommendation": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "specific_change": "Switch compute instances from t3.large to t3.medium and reduce minimum replica count from 8 to 4.\n",
+    "expected_cost_delta_usd": -2850.0,
+    "expected_performance_impact": "No regression; application_p95_latency_ms stays in 80\u2013140ms band",
+    "expected_reliability_impact": "SLA 99.5% preserved",
+    "confidence_expected": "high",
+    "eval_rubric_focus": [
+      "R1",
+      "R2",
+      "R3"
+    ]
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": false,
+    "primary_specialist_under_test": "compute_analyst"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

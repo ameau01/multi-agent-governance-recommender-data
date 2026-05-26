@@ -11,8 +11,20 @@ docs/internal/
 # Pipeline intermediates — debug-only, not the deliverable
 # ============================================================
 # Raw Pass 1 / Pass 2 JSON outputs are kept locally for
-# debugging across runs but are not checked in.
+# debugging across runs but are not checked in. This includes
+# day-chunked Pass 1 checkpoints, Pass 2 plan/verification
+# files, Pass 2 per-window agent logs, and the aggregated
+# pass1.json / pass2.json artifacts under intermediates/.
 intermediates/
+
+# ============================================================
+# Run logs — local-only, regenerated on every run
+# ============================================================
+# Timestamped run logs produced by `nohup ... > logs/...log`
+# and by the Python-side _log() helper. Useful for debugging
+# the most recent run but never part of the deliverable.
+logs/
+*.log
 
 # ============================================================
 # Python

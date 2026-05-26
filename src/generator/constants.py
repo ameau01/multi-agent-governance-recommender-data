@@ -126,6 +126,32 @@ CHUNK_RETRY_BACKOFF_SEC = float(os.getenv("DATAGEN_CHUNK_RETRY_BACKOFF_SEC", "2.
 # transient network blips, 5xx errors, and brief rate-limit windows.
 SDK_MAX_RETRIES = int(os.getenv("DATAGEN_SDK_MAX_RETRIES", "5"))
 
+# ---- Pass 2 window-based generation (new architecture) ----
+# Each LLM call handles ONE trigger window across all affected tiers.
+# Output is small (~10-30 records); fits comfortably in PASS2_WINDOW_MAX_TOKENS.
+PASS2_WINDOW_MAX_TOKENS = int(os.getenv("DATAGEN_PASS2_WINDOW_MAX_TOKENS", "8000"))
+# Per-window agent loop: max turns of "you failed validation, here's what's wrong, redo"
+# feedback before the window is declared unrecoverable and the run aborts.
+PASS2_AGENT_MAX_TURNS = int(os.getenv("DATAGEN_PASS2_AGENT_MAX_TURNS", "4"))
+# Consecutive trigger windows separated by ≤ this many minutes are merged into
+# one work item so the LLM sees the whole event and emits smooth adjustments.
+PASS2_MERGE_GAP_MINUTES = int(os.getenv("DATAGEN_PASS2_MERGE_GAP_MINUTES", "30"))
+# Per-scenario cost ceiling for Pass 2 (USD). Aborts cleanly with a checkpoint
+# in place if exceeded. Set to 0 to disable. Default = generous so quality runs
+# don't trip it, but a safety net against runaway agent loops.
+PASS2_SCENARIO_MAX_COST_USD = float(os.getenv("DATAGEN_PASS2_SCENARIO_MAX_COST_USD", "50.0"))
+# Verification call: every scenario (correlation or not) gets ONE Pass 2 LLM
+# call that samples Pass 1 records and confirms plausibility. Removes the
+# "no LLM ever" path for non-correlation scenarios. Set to "false" to skip.
+PASS2_VERIFICATION_ENABLED = (
+    os.getenv("DATAGEN_PASS2_VERIFICATION_ENABLED", "true").lower() in ("true", "1")
+)
+PASS2_VERIFICATION_MAX_TOKENS = int(os.getenv("DATAGEN_PASS2_VERIFICATION_MAX_TOKENS", "2000"))
+# How many records to sample (per active tier) for the verification call.
+PASS2_VERIFICATION_SAMPLE_PER_TIER = int(
+    os.getenv("DATAGEN_PASS2_VERIFICATION_SAMPLE_PER_TIER", "24")
+)
+
 # Batch API toggle (Phase B.6 deliverable)
 BATCH_MODE_ENV_VAR = "DATAGEN_BATCH_MODE"
 BATCH_MODE_DEFAULT = False
@@ -156,6 +182,16 @@ def operational_config_summary() -> dict[str, object]:
         "JUDGE_MAX_TOKENS": (JUDGE_MAX_TOKENS, src("DATAGEN_JUDGE_MAX_TOKENS")),
         "INTER_CHUNK_DELAY_SEC": (INTER_CHUNK_DELAY_SEC, src("DATAGEN_INTER_CHUNK_DELAY_SEC")),
         "CHUNK_RETRY_BACKOFF_SEC": (CHUNK_RETRY_BACKOFF_SEC, src("DATAGEN_CHUNK_RETRY_BACKOFF_SEC")),
+        "PASS2_WINDOW_MAX_TOKENS": (PASS2_WINDOW_MAX_TOKENS, src("DATAGEN_PASS2_WINDOW_MAX_TOKENS")),
+        "PASS2_AGENT_MAX_TURNS": (PASS2_AGENT_MAX_TURNS, src("DATAGEN_PASS2_AGENT_MAX_TURNS")),
+        "PASS2_MERGE_GAP_MINUTES": (PASS2_MERGE_GAP_MINUTES, src("DATAGEN_PASS2_MERGE_GAP_MINUTES")),
+        "PASS2_SCENARIO_MAX_COST_USD": (PASS2_SCENARIO_MAX_COST_USD, src("DATAGEN_PASS2_SCENARIO_MAX_COST_USD")),
+        "PASS2_VERIFICATION_ENABLED": (PASS2_VERIFICATION_ENABLED, src("DATAGEN_PASS2_VERIFICATION_ENABLED")),
+        "PASS2_VERIFICATION_MAX_TOKENS": (PASS2_VERIFICATION_MAX_TOKENS, src("DATAGEN_PASS2_VERIFICATION_MAX_TOKENS")),
+        "PASS2_VERIFICATION_SAMPLE_PER_TIER": (
+            PASS2_VERIFICATION_SAMPLE_PER_TIER,
+            src("DATAGEN_PASS2_VERIFICATION_SAMPLE_PER_TIER"),
+        ),
         "DATAGEN_BATCH_MODE": (
             os.getenv("DATAGEN_BATCH_MODE", "false").lower() in ("true", "1"),
             src("DATAGEN_BATCH_MODE"),
