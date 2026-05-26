@@ -1,0 +1,49 @@
+============================================================
+  Phase 01 — Pass 1 (base telemetry generation)
+============================================================
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/ameau01/project/multi-agent-governance-recommender-data/src/generator/cli.py", line 335, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/ameau01/project/multi-agent-governance-recommender-data/src/generator/cli.py", line 328, in main
+    return _run_phase(phase, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ameau01/project/multi-agent-governance-recommender-data/src/generator/cli.py", line 221, in _run_phase
+    raise NotImplementedError(
+NotImplementedError: Phase B/C — wire `pass1` with the resume pattern below. This shape is concrete; only the per-scenario function is a stub.
+
+    from generator.checkpoint import partition_scenarios
+    from generator.constants import ALL_SCENARIO_IDS, INTERMEDIATES_DIR
+    # phase → (model_cls, run_fn) — model_cls validates the checkpoint
+    PHASE_DISPATCH = {
+        'pass1':            (Pass1Output,             pipeline.run_pass1_for_scenario),
+        'pass2':            (Pass2Output,             pipeline.run_pass2_for_scenario),
+        'validate':         (QAReport,                pipeline.run_validate_for_scenario),
+        'smoke-test':       (SmokeTestRecommendation, smoke_test.generate_smoke_test_recommendation),
+        'smoke-test-judge': (SmokeTestJudgeResult,    smoke_test.judge_smoke_test_recommendation),
+    }
+    model_cls, run_fn = PHASE_DISPATCH['pass1']
+    scenario_ids = ... # filter by phase (Pass 2 only correlation scenarios)
+    if force:
+        partition = PhasePartition(phase='pass1', completed=[], remaining=scenario_ids)
+    else:
+        partition = partition_scenarios(scenario_ids, 'pass1', INTERMEDIATES_DIR, model_cls)
+    _print_phase_preview('pass1', batch=batch,
+                         completed_count=len(partition.completed),
+                         remaining_count=len(partition.remaining),
+                         force=force)
+    if partition.all_complete and not force:
+        print('✓ Nothing to do.'); return 0
+    if not yes and not _confirm():
+        print('Aborted.'); return 1
+    if batch:
+        os.environ['DATAGEN_BATCH_MODE'] = 'true'
+    # Run only the remaining scenarios; checkpoint each one as it completes.
+    for sid in partition.remaining:
+        result = run_fn(sid, ...)
+        write_pydantic_atomic(checkpoint_path(sid, 'pass1', INTERMEDIATES_DIR), result)
+        print(f'  [{sid}] ✓ {phase} complete')
+    print(f'\nPhase pass1 done. {len(partition.remaining)} new scenarios completed.')
+    return 0

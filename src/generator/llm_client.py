@@ -243,27 +243,95 @@ class LLMClient:
             ValueError: if the prompt template is malformed.
             anthropic.APIError: on API failures.
         """
-        raise NotImplementedError(
-            "Phase B.1 — fill in the call body. The parsing helpers above "
-            "(_parse_prompt_template, _build_message_content) and the cache_control "
-            "discipline are ready to use. See BUILD_PLAN.md §B.1. "
-            "A reference implementation skeleton:\n"
-            "    template = prompt_path.read_text()\n"
-            "    system_content, user_blocks = _parse_prompt_template(template)\n"
-            "    system_content = system_content.format(**substitutions)\n"
-            "    content = _build_message_content(user_blocks, substitutions)\n"
-            "    response = self._client.messages.create(\n"
-            "        model=self.model,\n"
-            "        max_tokens=self.max_tokens,\n"
-            "        temperature=self.temperature,\n"
-            "        system=[{'type': 'text', 'text': system_content,\n"
-            "                 'cache_control': EPHEMERAL_CACHE}],\n"
-            "        messages=[{'role': 'user', 'content': content}],\n"
-            "    )\n"
-            "    text = _strip_markdown_fencing(response.content[0].text)\n"
-            "    if log_path: _write_log(log_path, system_content, content, text, response.usage)\n"
-            "    return text"
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+
+        template = prompt_path.read_text(encoding="utf-8")
+        system_raw, user_blocks_raw = _parse_prompt_template(template)
+
+        system_content = system_raw.format(**substitutions) if system_raw else ""
+        user_content = _build_message_content(user_blocks_raw, substitutions)
+
+        system_payload = (
+            [{"type": "text", "text": system_content, "cache_control": EPHEMERAL_CACHE}]
+            if system_content else []
         )
+
+        response = self._client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            system=system_payload,
+            messages=[{"role": "user", "content": user_content}],
+        )
+
+        if not response.content or response.content[0].type != "text":
+            raise RuntimeError(
+                f"Unexpected response shape from model {self.model}: "
+                f"content={response.content!r}"
+            )
+        text = _strip_markdown_fencing(response.content[0].text)
+
+        if log_path is not None:
+            _write_log(
+                log_path,
+                model=self.model,
+                temperature=self.temperature,
+                system_content=system_content,
+                user_content=user_content,
+                response_text=text,
+                usage=getattr(response, "usage", None),
+                metadata=metadata,
+            )
+
+        return text
+
+
+def _write_log(
+    log_path: Path,
+    *,
+    model: str,
+    temperature: float,
+    system_content: str,
+    user_content: list[dict[str, Any]],
+    response_text: str,
+    usage: Any,
+    metadata: dict[str, Any] | None,
+) -> None:
+    """Persist a JSON log of one LLM call for debugging. Atomic write."""
+    import json, os, tempfile
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    usage_dict: dict[str, Any] = {}
+    if usage is not None:
+        for attr in (
+            "input_tokens", "output_tokens",
+            "cache_creation_input_tokens", "cache_read_input_tokens",
+        ):
+            val = getattr(usage, attr, None)
+            if val is not None:
+                usage_dict[attr] = val
+    payload = {
+        "model": model,
+        "temperature": temperature,
+        "system": system_content,
+        "user_blocks": user_content,
+        "response": response_text,
+        "usage": usage_dict,
+        "metadata": metadata or {},
+    }
+    fd, tmp_str = tempfile.mkstemp(
+        suffix=".tmp", prefix=log_path.name + ".", dir=str(log_path.parent),
+    )
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, log_path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # ============================================================

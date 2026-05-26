@@ -191,79 +191,237 @@ def _confirm(message: str = "Proceed?") -> bool:
 def _run_phase(phase: str, args: argparse.Namespace) -> int:
     """Top-level handler for phase-level commands (pass1-all, pass2-all, etc.).
 
-    Resume-aware. Steps:
-
-      1. Scan `intermediates/NN/<phase>.json` to determine which scenarios
-         already have valid checkpoints (use `checkpoint.partition_scenarios`).
-      2. If --force, ignore checkpoints — re-run all scenarios.
-      3. Print phase preview with resume reflection:
-            "Already complete: 12 (skipped)"
-            "Remaining to run:  6"
-            "Estimated cost:    ~$X (pro-rated)"
-      4. Unless --yes, ask for confirmation. If remaining=0, skip the prompt
-         and exit cleanly.
-      5. If --batch, set DATAGEN_BATCH_MODE=true for this process.
-      6. Dispatch to the phase implementation in pipeline.py / smoke_test.py.
-         The dispatched function MUST itself use the same resume pattern —
-         this is defense in depth.
-      7. Print final summary (per-scenario success/fail + total cost + wall time).
-
-    Recovery semantics: each scenario's output is written atomically to
-    `intermediates/NN/<phase>.json` after the LLM call returns successfully.
-    A SIGINT, Mac sleep, or crash during scenario K loses only scenario K's
-    work — scenarios 1..K-1 are durable. Re-running this command resumes
-    from K. No double-billing on completed scenarios.
+    Resume-aware: scans intermediates/ for valid checkpoints, skips completed
+    scenarios, shows pro-rated cost preview, runs only remaining scenarios.
+    Each scenario's output is written atomically as it completes.
     """
     batch = getattr(args, "batch", False)
     force = getattr(args, "force", False)
     yes = getattr(args, "yes", False)
 
-    raise NotImplementedError(
-        f"Phase B/C — wire `{phase}` with the resume pattern below. "
-        f"This shape is concrete; only the per-scenario function is a stub.\n"
-        f"\n"
-        f"    from generator.checkpoint import partition_scenarios\n"
-        f"    from generator.constants import ALL_SCENARIO_IDS, INTERMEDIATES_DIR\n"
-        f"    # phase → (model_cls, run_fn) — model_cls validates the checkpoint\n"
-        f"    PHASE_DISPATCH = {{\n"
-        f"        'pass1':            (Pass1Output,             pipeline.run_pass1_for_scenario),\n"
-        f"        'pass2':            (Pass2Output,             pipeline.run_pass2_for_scenario),\n"
-        f"        'validate':         (QAReport,                pipeline.run_validate_for_scenario),\n"
-        f"        'smoke-test':       (SmokeTestRecommendation, smoke_test.generate_smoke_test_recommendation),\n"
-        f"        'smoke-test-judge': (SmokeTestJudgeResult,    smoke_test.judge_smoke_test_recommendation),\n"
-        f"    }}\n"
-        f"    model_cls, run_fn = PHASE_DISPATCH['{phase}']\n"
-        f"    scenario_ids = ... # filter by phase (Pass 2 only correlation scenarios)\n"
-        f"    if force:\n"
-        f"        partition = PhasePartition(phase='{phase}', completed=[], remaining=scenario_ids)\n"
-        f"    else:\n"
-        f"        partition = partition_scenarios(scenario_ids, '{phase}', INTERMEDIATES_DIR, model_cls)\n"
-        f"    _print_phase_preview('{phase}', batch=batch,\n"
-        f"                         completed_count=len(partition.completed),\n"
-        f"                         remaining_count=len(partition.remaining),\n"
-        f"                         force=force)\n"
-        f"    if partition.all_complete and not force:\n"
-        f"        print('✓ Nothing to do.'); return 0\n"
-        f"    if not yes and not _confirm():\n"
-        f"        print('Aborted.'); return 1\n"
-        f"    if batch:\n"
-        f"        os.environ['DATAGEN_BATCH_MODE'] = 'true'\n"
-        f"    # Run only the remaining scenarios; checkpoint each one as it completes.\n"
-        f"    for sid in partition.remaining:\n"
-        f"        result = run_fn(sid, ...)\n"
-        f"        write_pydantic_atomic(checkpoint_path(sid, '{phase}', INTERMEDIATES_DIR), result)\n"
-        f"        print(f'  [{{sid}}] ✓ {{phase}} complete')\n"
-        f"    print(f'\\nPhase {phase} done. {{len(partition.remaining)}} new scenarios completed.')\n"
-        f"    return 0"
+    # Imports here to avoid loading the full pipeline at CLI parse time
+    from generator.checkpoint import partition_scenarios
+    from generator.constants import ALL_SCENARIO_IDS, INTERMEDIATES_DIR, SCENARIOS_OUTPUT_DIR
+    from generator.spec_loader import load_spec
+    from generator import pipeline
+    from generator.types import Pass1Output, Pass2Output
+    from qa.qa_validator_types import QAReport
+
+    # Determine scenarios in scope for this phase
+    if phase == "pass2":
+        # Only correlation scenarios use Pass 2
+        try:
+            scenario_ids = [
+                sid for sid in ALL_SCENARIO_IDS
+                if load_spec(sid).pass2_correlations
+            ]
+        except Exception as e:
+            print(f"ERROR loading specs to determine Pass 2 scope: {e}")
+            return 2
+    else:
+        scenario_ids = list(ALL_SCENARIO_IDS)
+
+    # Phase → (checkpoint_phase_name, model_cls_for_validation, runner_fn)
+    if phase == "pass1":
+        cp_phase, model_cls = "pass1", Pass1Output
+        def runner(sid: str) -> None:
+            pipeline.run_pass1_for_scenario(sid, intermediates_dir=INTERMEDIATES_DIR)
+    elif phase == "pass2":
+        cp_phase, model_cls = "pass2", Pass2Output
+        def runner(sid: str) -> None:
+            pipeline.run_pass2_for_scenario(
+                sid,
+                scenarios_dir=SCENARIOS_OUTPUT_DIR,
+                intermediates_dir=INTERMEDIATES_DIR,
+            )
+    elif phase == "validate":
+        cp_phase, model_cls = "qa_report", QAReport
+        def runner(sid: str) -> None:
+            pipeline.run_validate_for_scenario(
+                sid,
+                scenarios_dir=SCENARIOS_OUTPUT_DIR,
+                intermediates_dir=INTERMEDIATES_DIR,
+            )
+    elif phase == "smoke-test":
+        from qa.smoke_test import SmokeTestRecommendation
+        from qa import smoke_test as st
+        cp_phase, model_cls = "smoke_test", SmokeTestRecommendation
+        def runner(sid: str) -> None:
+            rec = st.generate_smoke_test_recommendation(
+                sid, SCENARIOS_OUTPUT_DIR, intermediates_dir=INTERMEDIATES_DIR,
+            )
+            st.write_smoke_test_recommendation(rec, INTERMEDIATES_DIR)
+    elif phase == "smoke-test-judge":
+        from qa.smoke_test import SmokeTestJudgeResult, read_smoke_test_recommendation
+        from qa import smoke_test as st
+        cp_phase, model_cls = "smoke_test_judge", SmokeTestJudgeResult
+        def runner(sid: str) -> None:
+            rec = read_smoke_test_recommendation(sid, INTERMEDIATES_DIR)
+            spec = load_spec(sid)
+            result = st.judge_smoke_test_recommendation(sid, rec, spec)
+            st.write_smoke_test_judge(result, INTERMEDIATES_DIR)
+    elif phase == "build":
+        # build-all: run the full pipeline for each scenario, no resume checkpoint
+        for sid in scenario_ids:
+            print(f"\n=== Building scenario {sid} ===")
+            result = pipeline.build_scenario(sid)
+            if result.success:
+                print(f"  ✓ {sid} ({'QA pass' if result.qa_passed else 'QA fail'})")
+            else:
+                print(f"  ✗ {sid} failed: {result.error}")
+        return 0
+    else:
+        print(f"ERROR: unknown phase {phase!r}")
+        return 2
+
+    # Resume partition
+    if force:
+        from generator.checkpoint import PhasePartition
+        partition = PhasePartition(
+            phase=cp_phase, completed=[], remaining=list(scenario_ids),
+        )
+    else:
+        partition = partition_scenarios(
+            scenario_ids, cp_phase, INTERMEDIATES_DIR, model_cls=model_cls,
+        )
+
+    # Preview
+    _print_phase_preview(
+        phase, batch=batch,
+        completed_count=len(partition.completed),
+        remaining_count=len(partition.remaining),
+        force=force,
     )
 
+    if partition.all_complete and not force:
+        print("✓ Nothing to do — all scenarios already have valid checkpoints.")
+        print("  Use --force to re-run all from scratch.")
+        return 0
 
-def _run_scenario(phase: str, args: argparse.Namespace) -> int:
+    if not yes:
+        if not _confirm():
+            print("Aborted.")
+            return 1
+
+    if batch:
+        os.environ["DATAGEN_BATCH_MODE"] = "true"
+
+    # Run each remaining scenario, checkpointing atomically
+    succeeded: list[str] = []
+    failed: list[tuple[str, str]] = []
+    for sid in partition.remaining:
+        print(f"\n  [{sid}] running {phase}...")
+        try:
+            runner(sid)
+            succeeded.append(sid)
+            print(f"  [{sid}] ✓ {phase} complete")
+        except Exception as e:
+            failed.append((sid, str(e)))
+            print(f"  [{sid}] ✗ {phase} FAILED: {type(e).__name__}: {e}")
+
+    # Summary
+    print()
+    print(f"=== Phase {phase} done ===")
+    print(f"  Previously complete (skipped): {len(partition.completed)}")
+    print(f"  Newly completed this run:      {len(succeeded)}")
+    print(f"  Failed this run:               {len(failed)}")
+    if failed:
+        print()
+        print("  Failures:")
+        for sid, err in failed:
+            print(f"    [{sid}]: {err}")
+        return 1
+    return 0
+
+
+def _run_scenario(command: str, args: argparse.Namespace) -> int:
     """Top-level handler for per-scenario commands (build, pass1, pass2, etc.)."""
-    raise NotImplementedError(
-        f"Phase A/B — wire `{phase}` for scenario {args.scenario_id} to its "
-        f"pipeline implementation. See BUILD_PLAN.md for the phase mapping."
-    )
+    scenario_id = args.scenario_id
+
+    from generator.constants import INTERMEDIATES_DIR, SCENARIOS_OUTPUT_DIR
+    from generator import pipeline
+    from generator.spec_loader import load_spec
+
+    try:
+        if command == "build":
+            print(f"=== Building scenario {scenario_id} end-to-end ===")
+            result = pipeline.build_scenario(scenario_id)
+            if not result.success:
+                print(f"✗ build failed: {result.error}")
+                return 1
+            if not result.qa_passed:
+                print(f"✗ build complete but QA failed")
+                return 1
+            print(f"✓ build complete, QA passed → scenarios/{scenario_id}/")
+            return 0
+
+        elif command == "build-metadata":
+            path = pipeline.run_metadata_for_scenario(scenario_id)
+            print(f"✓ Wrote {path}")
+            return 0
+
+        elif command == "build-terraform":
+            path = pipeline.run_terraform_for_scenario(scenario_id)
+            print(f"✓ Wrote {path}")
+            return 0
+
+        elif command == "pass1":
+            print(f"=== Pass 1 for scenario {scenario_id} ===")
+            path = pipeline.run_pass1_for_scenario(scenario_id)
+            print(f"✓ Pass 1 complete → {path}")
+            return 0
+
+        elif command == "pass2":
+            print(f"=== Pass 2 for scenario {scenario_id} ===")
+            pass2_path, ce_path = pipeline.run_pass2_for_scenario(scenario_id)
+            print(f"✓ Pass 2 complete → {pass2_path}")
+            print(f"✓ Correlation evidence → {ce_path}")
+            return 0
+
+        elif command == "validate":
+            print(f"=== Validating scenario {scenario_id} ===")
+            report = pipeline.run_validate_for_scenario(scenario_id)
+            print(f"Contract layer: {report.contract_layer.checks_passed}/{report.contract_layer.checks_run} passed")
+            print(f"Semantic layer: {report.semantic_layer.checks_passed}/{report.semantic_layer.checks_run} passed")
+            print(f"Overall: {report.overall}")
+            return 0 if report.overall == "pass" else 1
+
+        elif command == "smoke-test":
+            print(f"=== Smoke test (Opus) for scenario {scenario_id} ===")
+            from qa import smoke_test as st
+            rec = st.generate_smoke_test_recommendation(scenario_id)
+            path = st.write_smoke_test_recommendation(rec)
+            print(f"✓ Smoke test recommendation → {path}")
+            print(f"  finding_type:    {rec.finding_type}")
+            print(f"  primary_tier:    {rec.primary_tier}")
+            print(f"  action_category: {rec.action_category}")
+            print(f"  specific_change: {rec.specific_change[:120]}...")
+            return 0
+
+        elif command == "smoke-test-judge":
+            print(f"=== Smoke test judge for scenario {scenario_id} ===")
+            from qa import smoke_test as st
+            rec = st.read_smoke_test_recommendation(scenario_id)
+            spec = load_spec(scenario_id)
+            result = st.judge_smoke_test_recommendation(scenario_id, rec, spec)
+            path = st.write_smoke_test_judge(result)
+            print(f"✓ Judge result → {path}")
+            print(f"  outcome:         {result.outcome}")
+            print(f"  finding_type:    {'✓' if result.finding_type.match else '✗'}")
+            print(f"  primary_tier:    {'✓' if result.primary_tier.match else '✗'}")
+            print(f"  action_category: {'✓' if result.action_category.match else '✗'}")
+            print(f"  specific_change: {'✓' if result.specific_change.match else '✗'}")
+            return 0
+
+        else:
+            print(f"ERROR: unknown per-scenario command {command!r}")
+            return 2
+
+    except Exception as e:
+        import traceback
+        print(f"✗ {command} failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:

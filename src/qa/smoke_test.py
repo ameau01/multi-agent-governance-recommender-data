@@ -1,53 +1,42 @@
-"""Scenario-quality smoke test — split into two resumable phases.
+"""Scenario-quality smoke test — Opus recommendation + Haiku judge.
 
-The smoke test verifies that each generated scenario is *solvable* — that a
-baseline LLM can reach the target recommendation from the data alone. It is
-split into two phases so that an interruption to the cheap judge phase does
-not waste the more expensive Opus recommendation phase.
+Two phases:
 
-# Phase 1: `smoke_test` — Opus recommendation generation
+  Phase 4 (smoke_test): generate_smoke_test_recommendation() calls Opus 4.6
+  per scenario and saves SmokeTestRecommendation to
+  intermediates/NN/smoke_test.json.
 
-For each scenario, bundle the scenario folder into a prompt and ask Opus 4.6
-for a `TargetRecommendation` shaped result. Save to
-`intermediates/NN/smoke_test.json`. Cost: ~$1.45 across all 18 scenarios.
+  Phase 5 (smoke_test_judge): judge_smoke_test_recommendation() reads the
+  Opus output + the scenario spec, compares on 4 fields, uses Haiku for
+  the specific_change LLM-as-judge call.
 
-# Phase 2: `smoke_test_judge` — Haiku judging of recommendations
+The split makes the cheap-but-Opus-dependent phase recoverable without
+re-spending Opus tokens on resume.
 
-For each scenario, load the saved Opus recommendation, compare against the
-spec's target on four fields, use Haiku 4.5 for the one-line "substantively
-the same change? YES/NO" judgment on `specific_change`. Save outcome to
-`intermediates/NN/smoke_test_judge.json`. Cost: negligible (~$0.01 across all).
-
-# Why split?
-
-- **Recovery cost asymmetry.** Opus ($5/$25 per MTok) is ~5× the cost of
-  Sonnet and ~25× the cost of Haiku. If the judge phase is interrupted
-  mid-run after Opus has already produced 12 recommendations, we don't want
-  to re-pay for those 12 Opus calls just to finish the cheap judging.
-- **Manual review.** With the recommendations stored separately on disk,
-  you can review Opus's raw outputs in `intermediates/NN/smoke_test.json`
-  before letting the judge score them. If a recommendation looks wrong,
-  you can fix the scenario spec and regenerate, without spending
-  judge tokens on bad data.
-- **Independent re-runs.** If you tune the judge prompt or comparison logic,
-  you can re-run just the judge phase against unchanged Opus recommendations.
-
-# Resumability
-
-Both phases use the checkpoint pattern in `generator.checkpoint`. If the
-process is interrupted at scenario N of phase 1, re-running `smoke_test_all`
-will scan `intermediates/*/smoke_test.json`, skip the N-1 completed
-scenarios, and continue from N.
-
-See `docs/internal/scenario-quality-smoke-test.md` for the full design.
+See docs/internal/scenario-quality-smoke-test.md.
 """
 
 from __future__ import annotations
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
+from generator.checkpoint import (
+    checkpoint_path,
+    write_json_atomic,
+    write_pydantic_atomic,
+)
+from generator.constants import (
+    INTERMEDIATES_DIR,
+    SCENARIOS_OUTPUT_DIR,
+    SMOKE_TEST_JUDGE_MODEL,
+    SMOKE_TEST_MODEL,
+)
+from generator.llm_client import LLMClient
+from generator.spec_loader import load_all_specs, load_spec
 from generator.types import ScenarioSpec
 
 
@@ -57,20 +46,19 @@ from generator.types import ScenarioSpec
 class SmokeTestRecommendation(BaseModel):
     """Opus's output for one scenario, before judging.
 
-    Persisted to `intermediates/NN/smoke_test.json` after Phase 1. Used as
-    input to Phase 2 (judging). The shape mirrors the consumer-facing
-    `TargetRecommendation` model from the shared contract, so a reviewer
-    can diff it against `metadata.json.target_recommendation` by hand.
+    Persisted to intermediates/NN/smoke_test.json.
     """
 
     model_config = ConfigDict(extra="forbid")
     scenario_id: str
-    finding_type: Literal["issue_found", "no_issue_found", "insufficient_data", "diagnostic_deferral"]
+    finding_type: Literal[
+        "issue_found", "no_issue_found", "insufficient_data", "diagnostic_deferral"
+    ]
     primary_tier: Literal["compute", "database", "cache", "network"] | None = None
     secondary_tier: Literal["compute", "database", "cache", "network"] | None = None
-    action_category: str | None = None      # ActionCategory enum value, or None
+    action_category: str | None = None
     specific_change: str
-    raw_model_response: str | None = None   # full Opus response for audit
+    raw_model_response: str | None = None
 
 
 class FieldComparison(BaseModel):
@@ -81,11 +69,9 @@ class FieldComparison(BaseModel):
 
 
 class SmokeTestJudgeResult(BaseModel):
-    """The judging outcome for one scenario.
+    """Per-scenario judge outcome.
 
-    Persisted to `intermediates/NN/smoke_test_judge.json` after Phase 2.
-    Combined with the Phase 1 recommendation to form the per-scenario
-    smoke-test entry in the aggregate report.
+    Persisted to intermediates/NN/smoke_test_judge.json.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -98,10 +84,9 @@ class SmokeTestJudgeResult(BaseModel):
 
 
 class SmokeTestReport(BaseModel):
-    """Aggregate report across all scenarios. Combines Phase 1 + Phase 2.
+    """Aggregate report across all scenarios.
 
-    Persisted to `intermediates/smoke_test_report.json` after both phases
-    complete on all scenarios.
+    Persisted to intermediates/smoke_test_report.json.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -114,165 +99,409 @@ class SmokeTestReport(BaseModel):
     details: list[SmokeTestJudgeResult]
 
 
+_SMOKE_TEST_MAX_TOKENS = 4096
+_JUDGE_MAX_TOKENS = 50
+
+
 # ============================================================
-# Phase 1: smoke_test — Opus recommendation generation
+# Phase 4: smoke_test — Opus recommendation generation
 # ============================================================
 def generate_smoke_test_recommendation(
     scenario_id: str,
-    scenarios_dir: Path,
+    scenarios_dir: Path | None = None,
+    *,
+    intermediates_dir: Path | None = None,
 ) -> SmokeTestRecommendation:
-    """Run Phase 1 of the smoke test for one scenario.
+    """Run Phase 4 for one scenario: call Opus, parse, return."""
+    scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    scenario_dir = scenarios_dir / scenario_id
+    if not scenario_dir.exists():
+        raise FileNotFoundError(
+            f"Scenario folder not found: {scenario_dir}. "
+            f"Run Phases 1-3 for {scenario_id} first."
+        )
 
-    Steps:
-      1. Read the scenario folder under scenarios/NN/.
-      2. Build the prompt (metadata minus target + telemetry summaries +
-         correlation_evidence + main.tf). Strip target_recommendation and
-         evaluation_properties — they're the ground truth and would leak.
-      3. Call Opus 4.6 (model from constants.SMOKE_TEST_MODEL).
-      4. Parse the model response as TargetRecommendation-shaped JSON.
-      5. Return SmokeTestRecommendation.
+    prompt = _build_smoke_test_prompt(scenario_dir)
+    client = LLMClient(model=SMOKE_TEST_MODEL, max_tokens=_SMOKE_TEST_MAX_TOKENS, temperature=0.2)
 
-    The caller (smoke_test_all or smoke_test_scenario in cli.py) is
-    responsible for writing the result to
-    `intermediates/NN/smoke_test.json` via `checkpoint.write_pydantic_atomic`.
+    log_path = intermediates_dir / scenario_id / "smoke_test_llm_log.json"
+    response = _call_smoke_test_llm(client, prompt, log_path, scenario_id)
 
-    Returns:
-        SmokeTestRecommendation containing Opus's structured output.
+    # Parse JSON. Retry once on parse error.
+    try:
+        data = _parse_smoke_test_response(response, scenario_id)
+    except ValueError:
+        response = _call_smoke_test_llm(client, prompt + "\n\nReturn ONLY the JSON object — no markdown, no explanation.", log_path, scenario_id)
+        data = _parse_smoke_test_response(response, scenario_id)
 
-    Raises:
-        FileNotFoundError: if scenarios/NN/ is missing required files.
-        ValueError: if the Opus response doesn't parse as expected JSON.
-    """
-    raise NotImplementedError(
-        "Phase B.5.5 — see docs/internal/scenario-quality-smoke-test.md §2.1–2.2"
+    rec = SmokeTestRecommendation(
+        scenario_id=scenario_id,
+        finding_type=data["finding_type"],
+        primary_tier=data.get("primary_tier"),
+        secondary_tier=data.get("secondary_tier"),
+        action_category=data.get("action_category"),
+        specific_change=data["specific_change"],
+        raw_model_response=response,
     )
+    return rec
+
+
+def write_smoke_test_recommendation(
+    rec: SmokeTestRecommendation, intermediates_dir: Path | None = None,
+) -> Path:
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    target = checkpoint_path(rec.scenario_id, "smoke_test", intermediates_dir)
+    write_pydantic_atomic(target, rec)
+    return target
+
+
+def read_smoke_test_recommendation(
+    scenario_id: str, intermediates_dir: Path | None = None,
+) -> SmokeTestRecommendation:
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    target = checkpoint_path(scenario_id, "smoke_test", intermediates_dir)
+    if not target.exists():
+        raise FileNotFoundError(
+            f"Smoke test recommendation not found: {target}. "
+            f"Run smoke-test for {scenario_id} first."
+        )
+    return SmokeTestRecommendation.model_validate(json.loads(target.read_text()))
 
 
 def generate_smoke_test_recommendations_all(
-    scenarios_dir: Path,
-    intermediates_dir: Path,
+    scenarios_dir: Path | None = None,
+    *,
+    intermediates_dir: Path | None = None,
 ) -> dict[str, SmokeTestRecommendation]:
-    """Run Phase 1 across all scenarios, resumable.
-
-    Uses checkpoint.partition_scenarios to skip already-completed scenarios.
-    For each remaining scenario, calls generate_smoke_test_recommendation
-    and persists via checkpoint.write_pydantic_atomic.
-
-    Returns:
-        dict mapping scenario_id → SmokeTestRecommendation, including both
-        previously-completed (loaded from disk) and newly-generated entries.
-    """
-    raise NotImplementedError(
-        "Phase B.5.5 / C.2.5 — reference impl:\n"
-        "    from generator.checkpoint import partition_scenarios, write_pydantic_atomic, checkpoint_path\n"
-        "    from generator.constants import ALL_SCENARIO_IDS\n"
-        "    partition = partition_scenarios(ALL_SCENARIO_IDS, 'smoke_test', intermediates_dir, SmokeTestRecommendation)\n"
-        "    print(partition.summary_line())\n"
-        "    results = {sid: SmokeTestRecommendation.model_validate(read_json(...)) for sid in partition.completed}\n"
-        "    for sid in partition.remaining:\n"
-        "        rec = generate_smoke_test_recommendation(sid, scenarios_dir)\n"
-        "        write_pydantic_atomic(checkpoint_path(sid, 'smoke_test', intermediates_dir), rec)\n"
-        "        results[sid] = rec\n"
-        "    return results"
-    )
+    """Run Phase 4 across all 18 scenarios. Resume via checkpoint.partition_scenarios."""
+    scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    specs = load_all_specs()
+    results: dict[str, SmokeTestRecommendation] = {}
+    for spec in specs:
+        scenario_id = spec.scenario_id
+        existing = checkpoint_path(scenario_id, "smoke_test", intermediates_dir)
+        if existing.exists():
+            try:
+                results[scenario_id] = SmokeTestRecommendation.model_validate(
+                    json.loads(existing.read_text())
+                )
+                print(f"  [{scenario_id}] smoke_test — skipped (already complete)")
+                continue
+            except (ValidationError, json.JSONDecodeError):
+                pass  # fall through to regenerate
+        print(f"  [{scenario_id}] smoke_test — generating Opus recommendation...")
+        rec = generate_smoke_test_recommendation(
+            scenario_id, scenarios_dir, intermediates_dir=intermediates_dir,
+        )
+        write_smoke_test_recommendation(rec, intermediates_dir)
+        results[scenario_id] = rec
+    return results
 
 
 # ============================================================
-# Phase 2: smoke_test_judge — Haiku judging of recommendations
+# Phase 5: smoke_test_judge — Haiku judging
 # ============================================================
 def judge_smoke_test_recommendation(
     scenario_id: str,
     recommendation: SmokeTestRecommendation,
     spec: ScenarioSpec,
 ) -> SmokeTestJudgeResult:
-    """Run Phase 2 (judging) for one scenario.
+    """Compare the Opus recommendation against the spec's target on 4 fields."""
+    target = spec.target_recommendation
 
-    Compares the Opus recommendation against the spec's target on four fields:
-      - finding_type: exact string match
-      - primary_tier: exact string match (None matches None)
-      - action_category: exact enum match (None matches None)
-      - specific_change: Haiku LLM-as-judge — one-line "substantively the same? YES/NO"
+    ft_match = recommendation.finding_type == target.get("finding_type")
+    pt_match = (recommendation.primary_tier or None) == (target.get("primary_tier") or None)
+    ac_match = (recommendation.action_category or None) == (target.get("action_category") or None)
 
-    Scoring:
-      - pass: 4/4 fields match
-      - partial: 2-3/4
-      - fail: 0-1/4
+    target_change = target.get("specific_change", "")
+    sc_match = _judge_specific_change(target_change, recommendation.specific_change)
 
-    Args:
-        scenario_id: e.g. "07".
-        recommendation: The Phase 1 Opus output.
-        spec: The scenario spec (for spec.target_recommendation).
+    matches = sum([ft_match, pt_match, ac_match, sc_match])
+    if matches == 4:
+        outcome = "pass"
+    elif matches >= 2:
+        outcome = "partial"
+    else:
+        outcome = "fail"
 
-    Returns:
-        SmokeTestJudgeResult with per-field comparisons and overall outcome.
-    """
-    raise NotImplementedError(
-        "Phase B.5.5 — see docs/internal/scenario-quality-smoke-test.md §2.3–2.4"
+    return SmokeTestJudgeResult(
+        scenario_id=scenario_id,
+        outcome=outcome,
+        finding_type=FieldComparison(
+            target=str(target.get("finding_type")) if target.get("finding_type") else None,
+            produced=recommendation.finding_type,
+            match=ft_match,
+        ),
+        primary_tier=FieldComparison(
+            target=str(target.get("primary_tier")) if target.get("primary_tier") else None,
+            produced=recommendation.primary_tier,
+            match=pt_match,
+        ),
+        action_category=FieldComparison(
+            target=str(target.get("action_category")) if target.get("action_category") else None,
+            produced=recommendation.action_category,
+            match=ac_match,
+        ),
+        specific_change=FieldComparison(
+            target=target_change[:200],
+            produced=recommendation.specific_change[:200],
+            match=sc_match,
+        ),
     )
+
+
+def write_smoke_test_judge(
+    result: SmokeTestJudgeResult, intermediates_dir: Path | None = None,
+) -> Path:
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    target = checkpoint_path(result.scenario_id, "smoke_test_judge", intermediates_dir)
+    write_pydantic_atomic(target, result)
+    return target
 
 
 def judge_smoke_test_recommendations_all(
-    scenarios_dir: Path,
-    intermediates_dir: Path,
+    scenarios_dir: Path | None = None,
+    *,
+    intermediates_dir: Path | None = None,
 ) -> dict[str, SmokeTestJudgeResult]:
-    """Run Phase 2 across all scenarios, resumable.
-
-    Required precondition: Phase 1 (`generate_smoke_test_recommendations_all`)
-    has produced `intermediates/*/smoke_test.json` for every scenario the
-    judge needs to score. Scenarios without a Phase 1 checkpoint are skipped
-    with a warning (run Phase 1 first).
-
-    Resume logic via checkpoint.partition_scenarios on the "smoke_test_judge"
-    phase. Re-running picks up only the scenarios whose judge result is
-    missing or invalid.
-
-    Returns:
-        dict mapping scenario_id → SmokeTestJudgeResult.
-    """
-    raise NotImplementedError(
-        "Phase B.5.5 / C.2.5 — same resumable pattern as "
-        "generate_smoke_test_recommendations_all, but reads "
-        "smoke_test.json + scenario spec to produce smoke_test_judge.json."
-    )
+    """Run Phase 5 across all 18 scenarios. Resume-aware."""
+    scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
+    intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+    specs = load_all_specs()
+    results: dict[str, SmokeTestJudgeResult] = {}
+    for spec in specs:
+        scenario_id = spec.scenario_id
+        existing = checkpoint_path(scenario_id, "smoke_test_judge", intermediates_dir)
+        if existing.exists():
+            try:
+                results[scenario_id] = SmokeTestJudgeResult.model_validate(
+                    json.loads(existing.read_text())
+                )
+                print(f"  [{scenario_id}] smoke_test_judge — skipped (already complete)")
+                continue
+            except (ValidationError, json.JSONDecodeError):
+                pass
+        rec_path = checkpoint_path(scenario_id, "smoke_test", intermediates_dir)
+        if not rec_path.exists():
+            print(f"  [{scenario_id}] smoke_test_judge — skipped (smoke_test not run)")
+            continue
+        rec = SmokeTestRecommendation.model_validate(json.loads(rec_path.read_text()))
+        print(f"  [{scenario_id}] smoke_test_judge — judging...")
+        result = judge_smoke_test_recommendation(scenario_id, rec, spec)
+        write_smoke_test_judge(result, intermediates_dir)
+        results[scenario_id] = result
+    return results
 
 
 # ============================================================
-# Aggregation (after both phases complete)
+# Aggregate report
 # ============================================================
 def build_smoke_test_report(
     judge_results: dict[str, SmokeTestJudgeResult],
 ) -> SmokeTestReport:
-    """Aggregate per-scenario judge results into a top-level report.
+    """Aggregate per-scenario judge results into the aggregate report.
 
-    Threshold (per scenario-quality-smoke-test.md §3):
-      - ≥14 pass → GREEN
-      - 12–13 pass → YELLOW
-      - ≤11 pass → RED
+    Threshold per scenario-quality-smoke-test.md §3:
+      - ≥14 pass: GREEN
+      - 12-13 pass: YELLOW
+      - ≤11 pass: RED
     """
-    raise NotImplementedError("Phase B.5.5")
+    passed = sum(1 for r in judge_results.values() if r.outcome == "pass")
+    partial = sum(1 for r in judge_results.values() if r.outcome == "partial")
+    failed = sum(1 for r in judge_results.values() if r.outcome == "fail")
+    total = passed + partial + failed
+    if passed >= 14:
+        status: Literal["green", "yellow", "red"] = "green"
+    elif passed >= 12:
+        status = "yellow"
+    else:
+        status = "red"
+    return SmokeTestReport(
+        ran_at=datetime.now(timezone.utc).isoformat(),
+        scenarios_tested=total,
+        passed=passed,
+        partial=partial,
+        failed=failed,
+        aggregate_status=status,
+        details=list(judge_results.values()),
+    )
 
 
 # ============================================================
-# Helpers for prompt-building (shared between Phase 1 and Phase 2)
+# Helpers
 # ============================================================
-def _build_recommendation_prompt(scenario_dir: Path) -> str:
-    """Bundle metadata (minus target), telemetry summaries, correlations, terraform.
-
-    Strip target_recommendation and evaluation_properties from metadata before
-    inclusion — these are the ground truth and would leak the answer.
+def _build_smoke_test_prompt(scenario_dir: Path) -> str:
+    """Bundle metadata (target_recommendation + evaluation_properties stripped),
+    telemetry summaries (NOT raw records), correlation_evidence, and main.tf.
     """
-    raise NotImplementedError("Phase B.5.5")
+    metadata_full = json.loads((scenario_dir / "metadata.json").read_text())
+    # Strip ground truth before showing to model
+    metadata_redacted = {k: v for k, v in metadata_full.items()
+                         if k not in ("target_recommendation", "evaluation_properties")}
+
+    # Telemetry summaries
+    summaries = {}
+    for tier in ("compute", "database", "cache", "network"):
+        f = scenario_dir / f"{tier}_telemetry.json"
+        if not f.exists():
+            continue
+        records = json.loads(f.read_text())
+        if not records:
+            continue
+        summaries[tier] = _summarize_telemetry(records)
+
+    correlations = json.loads((scenario_dir / "correlation_evidence.json").read_text())
+    terraform = (scenario_dir / "main.tf").read_text()
+
+    return f"""You are a senior FinOps / SRE consultant reviewing a single cloud application. You have access to two weeks of telemetry summaries, the scenario metadata, cross-tier correlation evidence, and the Terraform infrastructure definition. Produce a single balanced recommendation that addresses cost, performance, and reliability trade-offs.
+
+Output ONLY a JSON object matching this schema (no markdown, no explanation):
+{{
+  "finding_type": "issue_found | no_issue_found | insufficient_data | diagnostic_deferral",
+  "primary_tier": "compute | database | cache | network | null",
+  "secondary_tier": "compute | database | cache | network | null",
+  "action_category": "rightsizing | replica_adjustment | pool_sizing | scaling_policy_change | load_balancer_reconfiguration | query_cache_optimization | network_topology_change | sla_review | null",
+  "specific_change": "free text — what specifically should change"
+}}
+
+## SCENARIO METADATA (target_recommendation and evaluation_properties redacted)
+
+{json.dumps(metadata_redacted, indent=2)}
+
+## TELEMETRY SUMMARIES (14-day window, 15-min intervals)
+
+{json.dumps(summaries, indent=2)}
+
+## CROSS-TIER CORRELATION EVIDENCE
+
+{json.dumps(correlations, indent=2)}
+
+## TERRAFORM INFRASTRUCTURE
+
+```hcl
+{terraform}
+```
+
+Output the JSON only.
+"""
 
 
-def _summarize_telemetry(telemetry_records: list) -> dict:
-    """Reduce 1,344 records to a compact summary for prompt injection.
+def _summarize_telemetry(records: list[dict]) -> dict:
+    """Compact summary of a telemetry array: p50/p95/mean/min/max/stddev per metric."""
+    if not records:
+        return {}
+    summary = {}
+    sample = records[0]
+    for metric_key in sample.keys():
+        if metric_key in ("timestamp", "instance_id"):
+            continue
+        values = [r[metric_key] for r in records if isinstance(r.get(metric_key), (int, float))]
+        if not values:
+            continue
+        values.sort()
+        n = len(values)
+        mean = sum(values) / n
+        p50 = values[n // 2]
+        p95 = values[int(n * 0.95)]
+        v_min, v_max = values[0], values[-1]
+        variance = sum((v - mean) ** 2 for v in values) / n
+        import math
+        stddev = math.sqrt(variance)
+        summary[metric_key] = {
+            "p50": round(p50, 3), "p95": round(p95, 3),
+            "mean": round(mean, 3), "min": round(v_min, 3), "max": round(v_max, 3),
+            "stddev": round(stddev, 3),
+        }
+    return summary
 
-    p50, p95, mean, min, max, stddev across the window + daily averages +
-    business-hours/off-hours split. Avoid dumping raw records into the prompt.
-    """
-    raise NotImplementedError("Phase B.5.5")
+
+def _call_smoke_test_llm(
+    client: LLMClient, prompt: str, log_path: Path, scenario_id: str,
+) -> str:
+    """Call the smoke-test LLM. Uses a single user message (no template caching)."""
+    response = client._client.messages.create(
+        model=client.model,
+        max_tokens=client.max_tokens,
+        temperature=client.temperature,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = response.content[0].text
+    # Manual log
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_payload = {
+        "model": client.model,
+        "scenario_id": scenario_id,
+        "prompt": prompt[:500] + "..." if len(prompt) > 500 else prompt,
+        "response": text,
+        "usage": {
+            "input_tokens": getattr(response.usage, "input_tokens", None),
+            "output_tokens": getattr(response.usage, "output_tokens", None),
+        },
+    }
+    write_json_atomic(log_path, log_payload)
+    return text
+
+
+def _parse_smoke_test_response(response: str, scenario_id: str) -> dict:
+    """Strip markdown if present, parse JSON, validate required fields."""
+    text = response.strip()
+    if text.startswith("```"):
+        import re
+        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+        if text.endswith("```"):
+            text = text[:-3].rstrip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Scenario {scenario_id}: smoke test response not valid JSON: {e}")
+    if not isinstance(data, dict):
+        raise ValueError(f"Scenario {scenario_id}: expected JSON object, got {type(data).__name__}")
+    if "finding_type" not in data:
+        raise ValueError(f"Scenario {scenario_id}: missing finding_type field")
+    if "specific_change" not in data:
+        raise ValueError(f"Scenario {scenario_id}: missing specific_change field")
+    # Normalize null-strings to None
+    for k in ("primary_tier", "secondary_tier", "action_category"):
+        if data.get(k) in ("null", "None", ""):
+            data[k] = None
+    return data
 
 
 def _judge_specific_change(target: str, produced: str) -> bool:
-    """One-line Haiku LLM-as-judge: "substantively the same change? YES/NO" """
-    raise NotImplementedError("Phase B.5.5")
+    """Haiku LLM-as-judge: one-line YES/NO comparison.
+
+    Falls back to substring match if Haiku call fails.
+    """
+    if not target or not produced:
+        return False
+    try:
+        client = LLMClient(
+            model=SMOKE_TEST_JUDGE_MODEL,
+            max_tokens=_JUDGE_MAX_TOKENS,
+            temperature=0.0,
+        )
+        # Direct prompt (no template) — judge call is too small to warrant caching
+        response = client._client.messages.create(
+            model=client.model,
+            max_tokens=client.max_tokens,
+            temperature=client.temperature,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Do these two recommendations propose substantively the same "
+                    "change to the same resources? Answer YES or NO only.\n"
+                    f"A: {target}\nB: {produced}"
+                ),
+            }],
+        )
+        verdict = response.content[0].text.strip().upper()
+        return verdict.startswith("YES")
+    except Exception as e:
+        print(f"    Judge LLM call failed ({type(e).__name__}); falling back to substring check")
+        # Crude fallback: do they share at least one significant word?
+        target_words = set(w.lower() for w in target.split() if len(w) > 4)
+        produced_words = set(w.lower() for w in produced.split() if len(w) > 4)
+        overlap = target_words & produced_words
+        return len(overlap) >= 2
