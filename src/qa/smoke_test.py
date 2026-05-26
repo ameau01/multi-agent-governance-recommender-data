@@ -45,21 +45,113 @@ from generator.types import ScenarioSpec
 # ============================================================
 # Result types
 # ============================================================
+# ---- Rich recommendation sub-models (all optional per leniency design) ----
+#
+# Design notes:
+#   - Only `finding_type` and `specific_change` are required on the top-level
+#     SmokeTestRecommendation. Every rich section below is optional.
+#   - Each nested model uses `extra="forbid"` to catch typos at the field
+#     boundary, but provides a `notes` catchall (where useful) so the model
+#     can emit prose that doesn't fit a defined field without breaking parse.
+#   - The schema is deliberately permissive about types (e.g. estimate ranges
+#     are strings, not numbers) — the 18 scenarios vary wildly and forcing
+#     numeric precision would create false signals on diagnostic_deferral
+#     and insufficient_data scenarios where the model legitimately can't
+#     commit to a number.
+class RecommendationConclusion(BaseModel):
+    """BLUF-style structured mirror of the top-level conclusion fields.
+
+    When present, the four enum fields here MUST match the top-level
+    values exactly (the prompt enforces this and the parser cross-checks).
+    `headline` is a new one-line summary suitable for UIs and logs.
+    """
+    model_config = ConfigDict(extra="forbid")
+    finding_type: Literal[
+        "issue_found", "no_issue_found", "insufficient_data", "diagnostic_deferral"
+    ] | None = None
+    primary_tier: Literal["compute", "database", "cache", "network"] | None = None
+    secondary_tier: Literal["compute", "database", "cache", "network"] | None = None
+    action_category: str | None = None
+    headline: str | None = None
+
+
+class RecommendationEvidence(BaseModel):
+    """Factual bullets cited from the inputs. Model is told NOT to invent."""
+    model_config = ConfigDict(extra="forbid")
+    telemetry_observations: list[str] = []
+    infrastructure_context: list[str] = []
+    correlation_observations: list[str] = []
+
+
+class ProjectedState(BaseModel):
+    """Estimated post-change utilization / latency. Strings to allow ranges."""
+    model_config = ConfigDict(extra="forbid")
+    cpu_p95_pct_estimate: str | None = None
+    memory_p95_pct_estimate: str | None = None
+    latency_p95_ms_estimate: str | None = None
+    sla_availability_preserved: bool | None = None
+    notes: str | None = None
+
+
+class CostImpact(BaseModel):
+    """Monthly cost projection. `current_monthly_usd` should come from
+    metadata.cost_baseline when the metadata says one; otherwise omit."""
+    model_config = ConfigDict(extra="forbid")
+    current_monthly_usd: float | None = None
+    projected_monthly_usd: float | None = None
+    savings_monthly_usd: float | None = None
+    savings_pct: float | None = None
+    notes: str | None = None
+
+
+class RiskAssessment(BaseModel):
+    """What could go wrong with the proposed change."""
+    model_config = ConfigDict(extra="forbid")
+    primary_risk: str | None = None
+    mitigation: str | None = None
+    rollback: str | None = None
+    notes: str | None = None
+
+
 class SmokeTestRecommendation(BaseModel):
     """Opus's output for one scenario, before judging.
 
     Persisted to intermediates/NN/smoke_test.json.
+
+    REQUIRED fields are `finding_type` and `specific_change`. The
+    flat top-level enum fields (`primary_tier`, `secondary_tier`,
+    `action_category`) remain at the top level both for backward
+    compatibility with existing checkpoints AND because the
+    smoke-test judge (`judge_smoke_test_recommendation`) compares
+    them directly without descending into `conclusion`.
+
+    All rich nested sections (`conclusion`, `evidence`, `reasoning`,
+    `projected_state`, `cost_impact`, `risk_assessment`) are
+    OPTIONAL — the model is instructed to omit any section it has
+    no signal for. This means a `no_issue_found` or
+    `diagnostic_deferral` recommendation can legitimately have
+    only the two required fields filled and pass validation.
     """
 
     model_config = ConfigDict(extra="forbid")
     scenario_id: str
+    # ---- REQUIRED ----
     finding_type: Literal[
         "issue_found", "no_issue_found", "insufficient_data", "diagnostic_deferral"
     ]
+    specific_change: str
+    # ---- Top-level conclusion (optional but typically present for issue_found) ----
     primary_tier: Literal["compute", "database", "cache", "network"] | None = None
     secondary_tier: Literal["compute", "database", "cache", "network"] | None = None
     action_category: str | None = None
-    specific_change: str
+    # ---- Rich sections (all optional) ----
+    conclusion: RecommendationConclusion | None = None
+    evidence: RecommendationEvidence | None = None
+    reasoning: str | None = None
+    projected_state: ProjectedState | None = None
+    cost_impact: CostImpact | None = None
+    risk_assessment: RiskAssessment | None = None
+    # ---- Audit trail ----
     raw_model_response: str | None = None
 
 
@@ -149,15 +241,7 @@ def generate_smoke_test_recommendation(
         response = _call_smoke_test_llm(client, prompt + "\n\nReturn ONLY the JSON object — no markdown, no explanation.", log_path, scenario_id)
         data = _parse_smoke_test_response(response, scenario_id)
 
-    rec = SmokeTestRecommendation(
-        scenario_id=scenario_id,
-        finding_type=data["finding_type"],
-        primary_tier=data.get("primary_tier"),
-        secondary_tier=data.get("secondary_tier"),
-        action_category=data.get("action_category"),
-        specific_change=data["specific_change"],
-        raw_model_response=response,
-    )
+    rec = _build_recommendation_from_payload(scenario_id, data, response)
     return rec
 
 
@@ -385,17 +469,37 @@ def _ensure_metadata_and_terraform(
         terraform_module.write_terraform(hcl, scenario_dir)
 
 
+# Externalized prompt template — see docs/internal/agent_recommendation_template.md
+# for the rationale, schema, and downstream-reuse notes. Loaded fresh on every
+# call so iteration on the prompt requires no code change or import refresh.
+_SMOKE_TEST_PROMPT_PATH = (
+    Path(__file__).resolve().parents[2] / "prompts" / "smoke_test.txt"
+)
+
+
 def _build_smoke_test_prompt(scenario_dir: Path) -> str:
-    """Bundle metadata (target_recommendation + evaluation_properties stripped),
-    telemetry summaries (NOT raw records), correlation_evidence, and main.tf.
+    """Render prompts/smoke_test.txt with this scenario's inputs.
+
+    The prompt template is in SYSTEM:/USER: form. We render it to a single
+    string with both sections so it can be passed as one user-message to
+    the LLM client (matching the existing non-streaming call shape).
+
+    Inputs bundled into the prompt (no raw telemetry records — only
+    summaries — to keep cost predictable and the smoke test honestly
+    discriminating between scenarios):
+      - metadata.json with `target_recommendation` and `evaluation_properties`
+        REDACTED (those are ground truth the model must not see)
+      - per-tier telemetry summaries (p50/p95/mean/min/max/stddev)
+      - correlation_evidence.json (verbatim)
+      - main.tf (verbatim)
     """
     metadata_full = json.loads((scenario_dir / "metadata.json").read_text())
     # Strip ground truth before showing to model
     metadata_redacted = {k: v for k, v in metadata_full.items()
                          if k not in ("target_recommendation", "evaluation_properties")}
 
-    # Telemetry summaries
-    summaries = {}
+    # Telemetry summaries (compact stats, NOT raw records)
+    summaries: dict[str, dict] = {}
     for tier in ("compute", "database", "cache", "network"):
         f = scenario_dir / f"{tier}_telemetry.json"
         if not f.exists():
@@ -408,37 +512,41 @@ def _build_smoke_test_prompt(scenario_dir: Path) -> str:
     correlations = json.loads((scenario_dir / "correlation_evidence.json").read_text())
     terraform = (scenario_dir / "main.tf").read_text()
 
-    return f"""You are a senior FinOps / SRE consultant reviewing a single cloud application. You have access to two weeks of telemetry summaries, the scenario metadata, cross-tier correlation evidence, and the Terraform infrastructure definition. Produce a single balanced recommendation that addresses cost, performance, and reliability trade-offs.
+    template = _SMOKE_TEST_PROMPT_PATH.read_text(encoding="utf-8")
+    system_text, user_template = _split_prompt(template)
 
-Output ONLY a JSON object matching this schema (no markdown, no explanation):
-{{
-  "finding_type": "issue_found | no_issue_found | insufficient_data | diagnostic_deferral",
-  "primary_tier": "compute | database | cache | network | null",
-  "secondary_tier": "compute | database | cache | network | null",
-  "action_category": "rightsizing | replica_adjustment | pool_sizing | scaling_policy_change | load_balancer_reconfiguration | query_cache_optimization | network_topology_change | sla_review | null",
-  "specific_change": "free text — what specifically should change"
-}}
+    # Substitute into the USER section
+    user_text = user_template.format(
+        metadata_block=json.dumps(metadata_redacted, indent=2),
+        summaries_block=json.dumps(summaries, indent=2),
+        correlations_block=json.dumps(correlations, indent=2),
+        terraform_block=terraform,
+    )
 
-## SCENARIO METADATA (target_recommendation and evaluation_properties redacted)
+    # The existing smoke-test LLM call sends a single user message, so we
+    # prepend the SYSTEM section as a leading paragraph. This preserves
+    # the system framing without requiring us to switch to the streaming
+    # client.call() path (smoke-test prompts are ~2K tokens, well under
+    # the 10-minute streaming threshold).
+    if system_text:
+        return f"{system_text.strip()}\n\n{user_text.strip()}\n"
+    return user_text
 
-{json.dumps(metadata_redacted, indent=2)}
 
-## TELEMETRY SUMMARIES (14-day window, 15-min intervals)
+def _split_prompt(template: str) -> tuple[str, str]:
+    """Split a SYSTEM:/USER: prompt template into its two halves.
 
-{json.dumps(summaries, indent=2)}
-
-## CROSS-TIER CORRELATION EVIDENCE
-
-{json.dumps(correlations, indent=2)}
-
-## TERRAFORM INFRASTRUCTURE
-
-```hcl
-{terraform}
-```
-
-Output the JSON only.
-"""
+    Mirrors the convention used by prompts/pass1.txt, prompts/pass2.txt,
+    and prompts/pass2_verification.txt. The first line of each section
+    is the marker (`SYSTEM:` / `USER:`); everything between is content.
+    """
+    if "\nUSER:" not in template:
+        # No system section — treat the whole template as the user content
+        return "", template.removeprefix("USER:").lstrip("\n")
+    system_part, _, user_part = template.partition("\nUSER:")
+    system_text = system_part.removeprefix("SYSTEM:").strip()
+    user_text = user_part.strip()
+    return system_text, user_text
 
 
 def _summarize_telemetry(records: list[dict]) -> dict:
@@ -498,7 +606,21 @@ def _call_smoke_test_llm(
 
 
 def _parse_smoke_test_response(response: str, scenario_id: str) -> dict:
-    """Strip markdown if present, parse JSON, validate required fields."""
+    """Strip markdown if present, parse JSON, validate REQUIRED fields.
+
+    Tolerant of both the old flat shape (only finding_type / primary_tier /
+    secondary_tier / action_category / specific_change at top level) and
+    the new rich shape (those same fields at top level PLUS optional
+    nested `conclusion` / `evidence` / `reasoning` / `projected_state` /
+    `cost_impact` / `risk_assessment` sections).
+
+    If `conclusion` is present, the parser lifts any missing top-level
+    enum fields from there (so a model that only fills `conclusion` and
+    omits the top-level mirror still produces a valid recommendation).
+    When BOTH are present and disagree, top-level wins and a warning
+    is printed — this should not happen in practice (the prompt
+    requires consistency) but better to fail-open than fail-closed.
+    """
     text = response.strip()
     if text.startswith("```"):
         import re
@@ -511,15 +633,71 @@ def _parse_smoke_test_response(response: str, scenario_id: str) -> dict:
         raise ValueError(f"Scenario {scenario_id}: smoke test response not valid JSON: {e}")
     if not isinstance(data, dict):
         raise ValueError(f"Scenario {scenario_id}: expected JSON object, got {type(data).__name__}")
+
+    # Lift conclusion fields up to top level if top level is missing them.
+    # (Prompt requires consistency, so this is mostly defensive.)
+    conclusion = data.get("conclusion") or {}
+    if isinstance(conclusion, dict):
+        for k in ("finding_type", "primary_tier", "secondary_tier", "action_category"):
+            if k not in data and k in conclusion:
+                data[k] = conclusion[k]
+            elif k in data and k in conclusion and data[k] != conclusion[k]:
+                # Disagreement — top-level wins; log for visibility.
+                print(
+                    f"  [{scenario_id}] WARNING: top-level {k}={data[k]!r} disagrees "
+                    f"with conclusion.{k}={conclusion[k]!r}; using top-level value"
+                )
+
+    # REQUIRED fields enforcement
     if "finding_type" not in data:
         raise ValueError(f"Scenario {scenario_id}: missing finding_type field")
     if "specific_change" not in data:
         raise ValueError(f"Scenario {scenario_id}: missing specific_change field")
-    # Normalize null-strings to None
+
+    # Normalize null-strings to None (some models emit the literal string "null")
     for k in ("primary_tier", "secondary_tier", "action_category"):
         if data.get(k) in ("null", "None", ""):
             data[k] = None
+
     return data
+
+
+def _build_recommendation_from_payload(
+    scenario_id: str, data: dict, raw_response: str,
+) -> SmokeTestRecommendation:
+    """Construct a SmokeTestRecommendation from a parsed payload.
+
+    Handles the lenient schema: rich sections are passed through to
+    Pydantic only when present. If the model returned only the legacy
+    flat shape, the nested fields stay None and the recommendation is
+    still valid.
+    """
+    # Build nested sub-models from dicts if present (Pydantic validates them).
+    def _opt(cls, key):
+        val = data.get(key)
+        if val is None or val == {}:
+            return None
+        return cls.model_validate(val) if isinstance(val, dict) else None
+
+    return SmokeTestRecommendation(
+        scenario_id=scenario_id,
+        # ---- REQUIRED ----
+        finding_type=data["finding_type"],
+        specific_change=data["specific_change"],
+        # ---- Top-level conclusion (optional) ----
+        primary_tier=data.get("primary_tier"),
+        secondary_tier=data.get("secondary_tier"),
+        action_category=data.get("action_category"),
+        # ---- Rich sections (optional) ----
+        conclusion=_opt(RecommendationConclusion, "conclusion"),
+        evidence=_opt(RecommendationEvidence, "evidence"),
+        reasoning=data.get("reasoning"),
+        projected_state=_opt(ProjectedState, "projected_state"),
+        cost_impact=_opt(CostImpact, "cost_impact"),
+        risk_assessment=_opt(RiskAssessment, "risk_assessment"),
+        # ---- Audit trail ----
+        raw_model_response=raw_response,
+    )
 
 
 def _judge_specific_change(target: str, produced: str) -> bool:
