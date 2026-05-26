@@ -405,7 +405,11 @@ def _check_healthy_band(spec: ScenarioSpec, arrays: dict[str, list[dict]]) -> Ch
     if not healthy_tiers:
         return CheckResult(check="healthy_band", result="pass", message="(no all_healthy tiers)")
 
-    # Loose check: for each healthy tier, p95-class metrics should be < 90% (not saturated)
+    # Loose check: for each healthy tier, percentage-shaped p95 metrics should be
+    # < 90% (not saturated). The check explicitly skips throughput/bandwidth fields
+    # because those are absolute units (Mbps, bytes/sec), NOT percentages, and the
+    # 90 threshold doesn't apply to them. (See healthy-baselines.md §52:
+    # network_throughput_p95 baseline is 100-500 Mbps.)
     issues = []
     for tier in healthy_tiers:
         arr = arrays.get(tier, [])
@@ -418,8 +422,16 @@ def _check_healthy_band(spec: ScenarioSpec, arrays: dict[str, list[dict]]) -> Ch
             if not values:
                 continue
             mean_v = sum(values) / len(values)
-            # Trivial sanity: percentage metrics shouldn't average > 90 for healthy tiers
-            if "p95" in metric_key and "latency" not in metric_key and "ratio" not in metric_key:
+            # Apply the 90% ceiling only to PERCENTAGE-shaped p95 fields.
+            is_percentage_p95 = (
+                "p95" in metric_key
+                and "latency" not in metric_key
+                and "ratio" not in metric_key
+                and "throughput" not in metric_key
+                and "bandwidth" not in metric_key
+                and "mbps" not in metric_key.lower()
+            )
+            if is_percentage_p95:
                 if mean_v > 90.0:
                     issues.append(f"{tier}.{metric_key} mean={mean_v:.1f} > 90 (not healthy)")
     if issues:
@@ -502,8 +514,42 @@ def _check_correlation_magnitude(spec: ScenarioSpec, arrays: dict[str, list[dict
     return CheckResult(check="correlation_magnitude", result="pass", message="(detailed check deferred)")
 
 
+# Threshold for the no_spurious_correlation check. Pairs with |Pearson| above
+# this are flagged unless they are explicitly declared in pass2_correlations
+# OR the spec's pattern text indicates intentional whole-app coupling.
+#
+# 0.30 was too strict: real cloud apps driven by the same request load
+# naturally exhibit |r| 0.30-0.60 between CPU, DB, and cache utilization.
+# 0.75 catches near-deterministic coupling (the truly spurious case) while
+# allowing normal request-driven coupling. See task #87 / #92 for context.
+_SPURIOUS_CORRELATION_THRESHOLD = 0.75
+
+# Pattern-text keywords that signal a spec INTENTIONALLY produces strong
+# whole-app coupling. When any of these appear in any pass2_correlations
+# rule's pattern field, we skip the spurious-correlation check entirely
+# for that scenario — the spec is declaring the coupling is expected.
+_INTENTIONAL_COUPLING_KEYWORDS = (
+    "all three tiers",
+    "all four tiers",
+    "simultaneously",
+    "rise together",
+    "fall together",
+    "co-presence",
+    "in lockstep",
+    "no clear lead-lag",
+)
+
+
 def _check_no_spurious_correlation(spec: ScenarioSpec, arrays: dict[str, list[dict]]) -> CheckResult:
-    """Tier pairs NOT in pass2_correlations should have |Pearson| < 0.30 between key metrics."""
+    """Tier pairs NOT in pass2_correlations should have |Pearson| < threshold.
+
+    Two skip conditions:
+      1. The pair is explicitly declared in pass2_correlations (existing behavior).
+      2. The spec's pattern text declares INTENTIONAL whole-app coupling
+         (e.g. "all three tiers rise together", "simultaneously"). In these
+         scenarios — like 11 (statistical co-presence) and 17 (no lead-lag
+         signature) — the coupling is the point of the scenario, not a bug.
+    """
     declared_pairs = set()
     for rule in spec.pass2_correlations or []:
         t = rule.get("trigger", {}).get("tier")
@@ -511,6 +557,20 @@ def _check_no_spurious_correlation(spec: ScenarioSpec, arrays: dict[str, list[di
             et = effect.get("tier")
             if t and et:
                 declared_pairs.add(frozenset([t, et]))
+
+    # Whole-app intentional-coupling detection.
+    pattern_text = " ".join(
+        (rule.get("pattern") or "") for rule in (spec.pass2_correlations or [])
+    ).lower()
+    intentional_coupling = any(
+        kw in pattern_text for kw in _INTENTIONAL_COUPLING_KEYWORDS
+    )
+    if intentional_coupling:
+        return CheckResult(
+            check="no_spurious_correlation",
+            result="pass",
+            message="(skipped — spec declares intentional cross-tier coupling)",
+        )
 
     non_empty_tiers = [t for t, a in arrays.items() if a]
     issues = []
@@ -528,9 +588,10 @@ def _check_no_spurious_correlation(spec: ScenarioSpec, arrays: dict[str, list[di
             if len(xs) != len(ys) or len(xs) < 2:
                 continue
             coeff = _pearson(xs, ys)
-            if abs(coeff) > 0.30:
+            if abs(coeff) > _SPURIOUS_CORRELATION_THRESHOLD:
                 issues.append(
-                    f"{tier_a}.{metric_a} vs {tier_b}.{metric_b}: |r|={abs(coeff):.2f} > 0.30"
+                    f"{tier_a}.{metric_a} vs {tier_b}.{metric_b}: "
+                    f"|r|={abs(coeff):.2f} > {_SPURIOUS_CORRELATION_THRESHOLD}"
                 )
     if issues:
         return CheckResult(check="no_spurious_correlation", result="fail",

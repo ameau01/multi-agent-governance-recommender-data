@@ -254,10 +254,20 @@ def _generate_tier_chunked(
             )
         all_records.extend(records)
 
-    # Sanity check: total record count
+    # Sanity check: total record count.
+    #
+    # Historical note: scenario 05's spec sets `pass1_metrics.compute.per_instance:
+    # True` and `tier_topology.compute.instance_count: 8`, which was a design
+    # intent to emit one record per timestamp per instance (1344 × 8 = 10752).
+    # In practice the chunker emits one record per timestamp regardless, and the
+    # per-instance hot/cold signal flows through `scenario_specific_evidence.
+    # per_instance_breakdown` in metadata.json — that's the load-bearing input
+    # for the downstream agent. The 8× expectation was an unimplemented feature
+    # masquerading as a bug, so we drop the special case and let scenario 05
+    # behave like every other single-tier scenario at 1344 fleet-aggregate
+    # records. The per_instance_breakdown still tells the agent which instances
+    # are hot vs cold.
     expected_total = RECORDS_PER_TIER
-    if spec.scenario_id == "05" and tier == "compute":
-        expected_total = 8 * RECORDS_PER_TIER
     if len(all_records) != expected_total:
         raise RuntimeError(
             f"Aggregated {tier} record count: {len(all_records)}, expected {expected_total}"

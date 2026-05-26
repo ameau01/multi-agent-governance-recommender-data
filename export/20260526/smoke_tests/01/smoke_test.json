@@ -1,0 +1,52 @@
+{
+  "scenario_id": "01",
+  "finding_type": "issue_found",
+  "specific_change": "Switch instance class from t3.large to t3.medium and reduce the fixed replica count from 8 to 4. Remove the launch template's t3.large instance_type in favor of t3.medium and set the aws_instance count to 4.",
+  "primary_tier": "compute",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Downsize compute from t3.large\u00d78 to t3.medium\u00d74 \u2014 save ~62% ($2,850/mo)"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "CPU p95 across 14 days: mean 21.2%, max 23.4% \u2014 never exceeds 25%.",
+      "Memory p95: mean 26.2%, max 29.9% \u2014 consistently below 30%.",
+      "Application P95 latency: mean 98.6 ms, max 110.1 ms \u2014 well under 500 ms SLA.",
+      "CPU stddev is 0.68% and latency stddev is 3.6 ms \u2014 no spikes or business-hours variation.",
+      "Network in/out p95 peaks at 63 Mbps / 58.9 Mbps \u2014 modest and stable."
+    ],
+    "infrastructure_context": [
+      "Terraform defines 8 fixed t3.large instances with no auto-scaling policy.",
+      "Single compute tier only \u2014 no database, cache, or network tiers provisioned.",
+      "Current monthly compute cost is $4,600 for the 8-instance fleet."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "Telemetry shows CPU p95 never exceeds 23.4% and memory p95 never exceeds 29.9% across the full 14-day window, with negligible variance \u2014 the fleet is chronically over-provisioned on both instance size and count. Halving the vCPU/memory per instance (t3.large \u2192 t3.medium) would roughly double per-instance utilization to ~42-48% CPU and ~52-60% memory, still well within safe headroom. Simultaneously reducing replicas from 8 to 4 is safe because even at half the fleet the aggregate capacity far exceeds observed demand, and the P95 latency of ~99 ms leaves a 4\u00d7 margin against the 500 ms SLA. No cross-tier dependencies exist to complicate the change.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "42-48",
+    "memory_p95_pct_estimate": "52-60",
+    "latency_p95_ms_estimate": "80-140",
+    "sla_availability_preserved": true,
+    "notes": "Estimates assume linear scaling: halving instance size doubles per-instance CPU/memory utilization; halving count doubles per-instance load. Combined effect ~4\u00d7 on utilization. Latency range from before/after evidence."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 4600.0,
+    "projected_monthly_usd": 1750.0,
+    "savings_monthly_usd": 2850.0,
+    "savings_pct": 61.96,
+    "notes": "t3.large on-demand ~$0.0832/hr; 8 instances \u00d7 730 hrs \u2248 $4,600/mo. t3.medium ~$0.0416/hr; 4 instances \u00d7 730 hrs \u2248 $1,215/mo (actual projected may be ~$1,750 accounting for EBS/network). Savings \u2248 $2,850/mo (62%)."
+  },
+  "risk_assessment": {
+    "primary_risk": "Unexpected traffic surge could push the smaller fleet past comfortable utilization, risking latency degradation or instance exhaustion.",
+    "mitigation": "Add a CloudWatch alarm on CPU p95 > 65% and P95 latency > 300 ms. Consider adding an ASG with min=4, max=8 to allow elastic scale-out if demand increases beyond current baseline.",
+    "rollback": "Revert Terraform instance_type to t3.large and count to 8, then terraform apply. Fleet restores within minutes since no data tier is involved.",
+    "notes": "The 14-day window shows zero variance patterns; if seasonal or event-driven spikes exist outside this window, a longer observation period should precede the change."
+  },
+  "raw_model_response": "```json\n{\n  \"finding_type\": \"issue_found\",\n  \"primary_tier\": \"compute\",\n  \"secondary_tier\": null,\n  \"action_category\": \"rightsizing\",\n  \"specific_change\": \"Switch instance class from t3.large to t3.medium and reduce the fixed replica count from 8 to 4. Remove the launch template's t3.large instance_type in favor of t3.medium and set the aws_instance count to 4.\",\n  \"conclusion\": {\n    \"finding_type\": \"issue_found\",\n    \"primary_tier\": \"compute\",\n    \"secondary_tier\": null,\n    \"action_category\": \"rightsizing\",\n    \"headline\": \"Downsize compute from t3.large\u00d78 to t3.medium\u00d74 \u2014 save ~62% ($2,850/mo)\"\n  },\n  \"evidence\": {\n    \"telemetry_observations\": [\n      \"CPU p95 across 14 days: mean 21.2%, max 23.4% \u2014 never exceeds 25%.\",\n      \"Memory p95: mean 26.2%, max 29.9% \u2014 consistently below 30%.\",\n      \"Application P95 latency: mean 98.6 ms, max 110.1 ms \u2014 well under 500 ms SLA.\",\n      \"CPU stddev is 0.68% and latency stddev is 3.6 ms \u2014 no spikes or business-hours variation.\",\n      \"Network in/out p95 peaks at 63 Mbps / 58.9 Mbps \u2014 modest and stable.\"\n    ],\n    \"infrastructure_context\": [\n      \"Terraform defines 8 fixed t3.large instances with no auto-scaling policy.\",\n      \"Single compute tier only \u2014 no database, cache, or network tiers provisioned.\",\n      \"Current monthly compute cost is $4,600 for the 8-instance fleet.\"\n    ]\n  },\n  \"reasoning\": \"Telemetry shows CPU p95 never exceeds 23.4% and memory p95 never exceeds 29.9% across the full 14-day window, with negligible variance \u2014 the fleet is chronically over-provisioned on both instance size and count. Halving the vCPU/memory per instance (t3.large \u2192 t3.medium) would roughly double per-instance utilization to ~42-48% CPU and ~52-60% memory, still well within safe headroom. Simultaneously reducing replicas from 8 to 4 is safe because even at half the fleet the aggregate capacity far exceeds observed demand, and the P95 latency of ~99 ms leaves a 4\u00d7 margin against the 500 ms SLA. No cross-tier dependencies exist to complicate the change.\",\n  \"projected_state\": {\n    \"cpu_p95_pct_estimate\": \"42-48\",\n    \"memory_p95_pct_estimate\": \"52-60\",\n    \"latency_p95_ms_estimate\": \"80-140\",\n    \"sla_availability_preserved\": true,\n    \"notes\": \"Estimates assume linear scaling: halving instance size doubles per-instance CPU/memory utilization; halving count doubles per-instance load. Combined effect ~4\u00d7 on utilization. Latency range from before/after evidence.\"\n  },\n  \"cost_impact\": {\n    \"current_monthly_usd\": 4600.0,\n    \"projected_monthly_usd\": 1750.0,\n    \"savings_monthly_usd\": 2850.0,\n    \"savings_pct\": 61.96,\n    \"notes\": \"t3.large on-demand ~$0.0832/hr; 8 instances \u00d7 730 hrs \u2248 $4,600/mo. t3.medium ~$0.0416/hr; 4 instances \u00d7 730 hrs \u2248 $1,215/mo (actual projected may be ~$1,750 accounting for EBS/network). Savings \u2248 $2,850/mo (62%).\"\n  },\n  \"risk_assessment\": {\n    \"primary_risk\": \"Unexpected traffic surge could push the smaller fleet past comfortable utilization, risking latency degradation or instance exhaustion.\",\n    \"mitigation\": \"Add a CloudWatch alarm on CPU p95 > 65% and P95 latency > 300 ms. Consider adding an ASG with min=4, max=8 to allow elastic scale-out if demand increases beyond current baseline.\",\n    \"rollback\": \"Revert Terraform instance_type to t3.large and count to 8, then terraform apply. Fleet restores within minutes since no data tier is involved.\",\n    \"notes\": \"The 14-day window shows zero variance patterns; if seasonal or event-driven spikes exist outside this window, a longer observation period should precede the change.\"\n  }\n}\n```"
+}

@@ -91,6 +91,32 @@ CROSS-TIER CORRELATION:
 None at this pass. Generate this tier independently. The next pass adds
 correlations if the scenario calls for them.
 
+PHASE-DECOUPLING (important for scenarios with multiple tiers):
+You are generating ONE tier at a time. If a sibling tier in this scenario
+uses the same diurnal pattern (e.g., both compute and network use
+"weekday_business_hours_elevated"), the two tiers' time series MUST NOT
+be near-identical in shape — that would create spurious cross-tier
+correlation that downstream consumers would mistakenly read as a causal
+relationship.
+
+To prevent this, for THIS tier specifically:
+  - Pick a tier-specific peak hour offset within business hours
+    (e.g., compute peaks around 11:00, database peaks around 13:30,
+    cache peaks around 14:00, network peaks around 10:30).
+    The exact value doesn't matter — what matters is that this tier's
+    peak hour is NOT identical to other tiers' peak hours.
+  - Amplitude variance between off-band and peak should differ from
+    sibling tiers by 10–20% (e.g., compute amplitude ratio 1.4×,
+    database amplitude ratio 1.6×).
+  - Add per-record micro-noise of ±2–5% so that even slot-by-slot
+    values within the band differ.
+The shape should still clearly read as "elevated during business hours",
+but should NOT look like a near-perfect copy of another tier's elevation.
+
+When the scenario has only ONE active tier, or its specific spec
+overrides this guidance (e.g., a "lockstep" or "simultaneous" pattern
+is explicitly declared in the narrative), ignore this section.
+
 OUTPUT SCHEMA (strict):
 {{
   "scenario_id": "<from the SCENARIO heading below>",

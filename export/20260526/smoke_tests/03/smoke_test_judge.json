@@ -1,0 +1,24 @@
+{
+  "scenario_id": "03",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "database",
+    "produced": "database",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Downsize primary RDS instance from db.r6g.xlarge to db.r6g.large and enable storage auto-scaling.\n",
+    "produced": "Downsize the primary RDS instance from db.r6g.xlarge to db.r6g.large and enable storage auto-scaling on the database to eliminate manual storage management overhead.",
+    "match": true
+  }
+}
