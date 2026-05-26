@@ -38,6 +38,11 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Make `generator` and `qa` importable from src/ as top-level packages
+# (defensive — works even if `uv sync` hasn't been re-run after the
+# pyproject.toml src-layout fix).
+export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
 echo "============================================================"
 echo "  Phase 01 — Pass 1 (base telemetry generation)"
 echo "============================================================"

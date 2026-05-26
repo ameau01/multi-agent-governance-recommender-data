@@ -44,6 +44,7 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "============================================================"
 echo "  Phase 04 — Smoke-test recommendation (Opus 4.6)"

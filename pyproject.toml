@@ -32,5 +32,9 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# src-layout — each subpackage of src/ is installed at the top level so
+# `from generator import ...` and `from qa import ...` work after `uv sync`.
+# (Earlier config used `packages = ["src"]` which installed everything under
+# the `src.` namespace and broke `python -m generator.cli`.)
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/generator", "src/qa", "src/contracts"]

@@ -46,6 +46,7 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 echo "============================================================"
 echo "  Phase 05 — Smoke-test judge (Haiku 4.5)"
