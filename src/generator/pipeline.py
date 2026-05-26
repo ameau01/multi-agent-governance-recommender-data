@@ -90,15 +90,69 @@ def run_terraform_for_scenario(
     return terraform_module.write_terraform(hcl, scenarios_dir / scenario_id)
 
 
+# ============================================================
+# Shared scenario-prerequisites helper
+# ============================================================
+def ensure_scenario_prerequisites(
+    scenario_id: str,
+    *,
+    scenarios_dir: Path | None = None,
+) -> None:
+    """Build scenarios/NN/metadata.json and main.tf if missing.
+
+    Both are produced by deterministic, no-LLM builders
+    (generator.metadata + generator.terraform). They are required
+    inputs for `validate` and `smoke-test`, but neither pass1 nor
+    pass2 produces them.
+
+    Idempotent and free: skips entirely when both files already
+    exist; never overwrites an existing file. Lets the user run
+    any subset of `[pass1, pass2, validate, smoke-test, smoke-test-judge]`
+    in order without remembering to manually run `build-metadata`
+    and `build-terraform` between pass2 and validate.
+
+    This is the single source of truth for the auto-prestep —
+    both `run_validate_for_scenario` and `qa.smoke_test` delegate
+    to this function so the two paths can't drift.
+    """
+    scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
+    scenario_dir = scenarios_dir / scenario_id
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = scenario_dir / "metadata.json"
+    terraform_path = scenario_dir / "main.tf"
+    if metadata_path.exists() and terraform_path.exists():
+        return
+
+    spec = load_spec(scenario_id)
+    meta = metadata_module.build_metadata(spec)
+
+    if not metadata_path.exists():
+        metadata_module.write_metadata(meta, scenario_dir)
+    if not terraform_path.exists():
+        hcl = terraform_module.render_terraform(meta)
+        terraform_module.validate_terraform(hcl, meta)
+        terraform_module.write_terraform(hcl, scenario_dir)
+
+
 def run_validate_for_scenario(
     scenario_id: str,
     *,
     scenarios_dir: Path | None = None,
     intermediates_dir: Path | None = None,
 ):
-    """Run QA validator for one scenario."""
+    """Run QA validator for one scenario.
+
+    Auto-builds the two deterministic upstream artifacts (metadata.json
+    and main.tf) before validating, so that the contract-layer check
+    "all expected files exist" doesn't fail after just pass1+pass2.
+    """
     scenarios_dir = scenarios_dir or SCENARIOS_OUTPUT_DIR
     intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
+
+    # Prestep — same helper smoke_test uses. Idempotent.
+    ensure_scenario_prerequisites(scenario_id, scenarios_dir=scenarios_dir)
+
     spec = load_spec(scenario_id)
     return qa_validator.validate_scenario(
         scenario_id, scenarios_dir, spec, intermediates_dir,

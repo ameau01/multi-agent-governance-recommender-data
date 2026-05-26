@@ -435,38 +435,15 @@ def _ensure_metadata_and_terraform(
 ) -> None:
     """Build scenarios/NN/metadata.json and main.tf if missing.
 
-    Both are produced by deterministic, no-LLM builders
-    (generator.metadata + generator.terraform) and are
-    prerequisites for the smoke-test prompt. Building them on
-    demand here means callers (CLI per-scenario, CLI -all,
-    programmatic) never have to remember the prestep.
-
-    No-op when both files already exist on disk — this keeps the
-    fast path fast on re-runs and avoids any risk of clobbering
-    a hand-edited file the user wants to preserve.
+    Thin wrapper around `generator.pipeline.ensure_scenario_prerequisites`.
+    The real logic lives in pipeline.py so that `validate` and `smoke-test`
+    share a single source of truth — if the prestep contract ever changes,
+    we only edit one place.
     """
-    scenario_dir = scenarios_dir / scenario_id
-    scenario_dir.mkdir(parents=True, exist_ok=True)
-
-    metadata_path = scenario_dir / "metadata.json"
-    terraform_path = scenario_dir / "main.tf"
-    if metadata_path.exists() and terraform_path.exists():
-        return
-
     # Lazy import — keeps the smoke-test module importable even
     # if someone is unit-testing it without the generator package.
-    from generator import metadata as metadata_module
-    from generator import terraform as terraform_module
-
-    spec = load_spec(scenario_id)
-    meta = metadata_module.build_metadata(spec)
-
-    if not metadata_path.exists():
-        metadata_module.write_metadata(meta, scenario_dir)
-    if not terraform_path.exists():
-        hcl = terraform_module.render_terraform(meta)
-        terraform_module.validate_terraform(hcl, meta)
-        terraform_module.write_terraform(hcl, scenario_dir)
+    from generator import pipeline
+    pipeline.ensure_scenario_prerequisites(scenario_id, scenarios_dir=scenarios_dir)
 
 
 # Externalized prompt template — see docs/internal/agent_recommendation_template.md

@@ -1,0 +1,119 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "05",
+  "scenario_name": "Load Balancer Inefficiency",
+  "scenario_type": "single_tier_negative",
+  "generated_at": "2026-05-26T07:06:29.049192Z",
+  "narrative": {
+    "what_this_demonstrates": "A fleet behind an Application Load Balancer using round-robin distribution. Cluster-level aggregates show a wide p50-to-p95 spread because some instances are persistently overloaded while others are persistently idle. The fix is a load-balancing algorithm change, not a capacity change.\n",
+    "why_this_scenario_exists": "Tests the Compute Analyst's ability to read per-instance variance from the per_instance_breakdown fixture and recognize that the cluster-level average masks a distribution problem. Capacity adjustments would not fix the imbalance.\n",
+    "what_the_agent_should_conclude": "Reconfigure the target group from round_robin to least_outstanding_requests. Expected: per-instance CPU variance drops below 12%.\n",
+    "what_distinguishes_good_from_great": "A good recommendation identifies the imbalance. A great recommendation specifies the algorithm change explicitly (round_robin \u2192 least_outstanding_requests) and notes that capacity adjustments would not address the root cause.\n"
+  },
+  "business_context": {
+    "description": "High-criticality API gateway",
+    "sla_target_description": "99.9% availability, P95 < 300ms",
+    "sla_target_p95_ms": 300,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 3800.0,
+    "by_tier": {
+      "compute": 3800.0,
+      "database": 0.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "c5.xlarge",
+      "instance_count": 8,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": null,
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "round_robin"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": [
+      {
+        "instance_id": "i-001",
+        "cpu_band": "78-88% sustained (hot)"
+      },
+      {
+        "instance_id": "i-002",
+        "cpu_band": "78-88% sustained (hot)"
+      },
+      {
+        "instance_id": "i-003",
+        "cpu_band": "78-88% sustained (hot)"
+      },
+      {
+        "instance_id": "i-004",
+        "cpu_band": "78-88% sustained (hot)"
+      },
+      {
+        "instance_id": "i-005",
+        "cpu_band": "8-18% sustained (cold)"
+      },
+      {
+        "instance_id": "i-006",
+        "cpu_band": "8-18% sustained (cold)"
+      },
+      {
+        "instance_id": "i-007",
+        "cpu_band": "8-18% sustained (cold)"
+      },
+      {
+        "instance_id": "i-008",
+        "cpu_band": "8-18% sustained (cold)"
+      }
+    ]
+  },
+  "before_after_evidence": {
+    "config_before": "ALB with round_robin algorithm, 8 c5.xlarge",
+    "config_after": "ALB with least_outstanding_requests algorithm, 8 c5.xlarge (unchanged)",
+    "observed_outcome_summary": "CPU variance across instances dropped below 12%, application_p95_latency_ms converged to the 200\u2013240ms band across all instances, SLA 99.9% preserved. No capacity change required.\n",
+    "source_attribution": "Pattern observed across api-gateway cohort during Q4 2025."
+  },
+  "target_recommendation": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": "network",
+    "action_category": "load_balancer_reconfiguration",
+    "specific_change": "Reconfigure ALB target group from round_robin to least_outstanding_requests. Do not change instance class or count.\n",
+    "expected_cost_delta_usd": 0.0,
+    "expected_performance_impact": "Per-instance CPU variance drops below 12%; latency converges across instances",
+    "expected_reliability_impact": "SLA 99.9% preserved",
+    "confidence_expected": "high",
+    "eval_rubric_focus": [
+      "R1",
+      "R2",
+      "R3"
+    ]
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": false,
+    "primary_specialist_under_test": "compute_analyst"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

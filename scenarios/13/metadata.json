@@ -1,0 +1,87 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "13",
+  "scenario_name": "Compute Spike + Database Strain",
+  "scenario_type": "cross_tier_negative",
+  "generated_at": "2026-05-26T07:06:29.174806Z",
+  "narrative": {
+    "what_this_demonstrates": "A search service where weekday peak-hour compute spikes drive database connection counts roughly 3x above baseline, exhausting the connection pool. Both tiers need attention: compute needs predictive scaling, database needs replicas and a larger pool.\n",
+    "why_this_scenario_exists": "Tests cross-tier compound recommendations. Neither tier alone is sufficient \u2014 the right answer is a coordinated change.\n",
+    "what_the_agent_should_conclude": "Implement predictive auto-scaling on compute (scale out at cpu_p95 > 65), add 2 read replicas with read/write splitting on database, and raise connection pool from 150 to 300.\n",
+    "what_distinguishes_good_from_great": "A good recommendation identifies both tiers as problems. A great recommendation pairs them coherently \u2014 scaling compute alone leaves the pool exhausted; raising the pool alone leaves compute saturated.\n"
+  },
+  "business_context": {
+    "description": "High-criticality search service",
+    "sla_target_description": "99.9% availability, P95 < 350ms",
+    "sla_target_p95_ms": 350,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 7800.0,
+    "by_tier": {
+      "compute": 4800.0,
+      "database": 3000.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.large",
+      "instance_count": 8,
+      "scaling_policy": "step",
+      "auto_scaling_min": 8,
+      "auto_scaling_max": 12
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.xlarge",
+      "replicas": 1,
+      "storage_gb": 500
+    },
+    "cache": null,
+    "network": null
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.large \u00d7 8 step scaling + db.r6g.xlarge with pool=150 and 0 replicas",
+    "config_after": "m5.large \u00d7 8-14 with predictive scaling + db.r6g.xlarge with pool=300 and 2 read replicas",
+    "observed_outcome_summary": "Peak-hour spikes were absorbed without saturation. application_p95_latency_ms dropped from 420\u2013580ms peak to 240\u2013320ms peak. db_connections_p95 stayed below the new 300 pool ceiling. SLA 99.9% preserved.\n",
+    "source_attribution": "Pattern observed across search-service cohort during Q4 2025."
+  },
+  "target_recommendation": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": "database",
+    "action_category": "scaling_policy_change",
+    "specific_change": "Implement predictive auto-scaling on compute (scale out at cpu_p95 > 65, max 14 instances). Add 2 read replicas with read/write splitting on database. Raise connection pool limit from 150 to 300.\n",
+    "expected_cost_delta_usd": 680.0,
+    "expected_performance_impact": "application_p95_latency_ms drops to 240\u2013320ms during spikes; database connection saturation eliminated",
+    "expected_reliability_impact": "SLA 99.9% preserved",
+    "confidence_expected": "high",
+    "eval_rubric_focus": [
+      "R1",
+      "R2",
+      "R3"
+    ]
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}
