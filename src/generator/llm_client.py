@@ -63,17 +63,30 @@ decorate the calling function with `@langsmith.traceable(name="...", metadata=..
 from __future__ import annotations
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+
+def _log(msg: str = "", *, end: str = "\n") -> None:
+    """Print one progress line prefixed with [HH:MM:SS], always flushed.
+
+    Empty / whitespace-only messages pass through unstamped so spacing stays clean.
+    """
+    if not msg.strip():
+        print(msg, end=end, flush=True)
+        return
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] {msg}", end=end, flush=True)
 
 # Load .env at module import. Idempotent — safe to call from cli.py as well.
 load_dotenv()
 
 import anthropic
 
-from generator.constants import LLM_TEMPERATURE
+from generator.constants import LLM_TEMPERATURE, SDK_MAX_RETRIES
 
 
 CACHE_MARKER = "<<<CACHE>>>"
@@ -90,7 +103,9 @@ def _make_anthropic_client() -> "anthropic.Anthropic":
     The LangSmith wrapper has the same interface as the raw Anthropic client.
     Project name is picked up from the LANGSMITH_PROJECT env var.
     """
-    raw_client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+    # SDK-level retries absorb transient 5xx, network blips, and brief
+    # rate-limit windows. Bumped from default (2) to SDK_MAX_RETRIES via .env.
+    raw_client = anthropic.Anthropic(max_retries=SDK_MAX_RETRIES)  # reads ANTHROPIC_API_KEY from env
 
     tracing_enabled = os.getenv("LANGSMITH_TRACING", "").lower() in ("true", "1")
     if tracing_enabled:
@@ -257,12 +272,37 @@ class LLMClient:
             if system_content else []
         )
 
-        response = self._client.messages.create(
+        # Use streaming — Anthropic SDK requires it for requests that may
+        # exceed 10 minutes (which our Pass 1 / Pass 2 calls with
+        # max_tokens=64000 can). Streaming has no behavioral difference
+        # in the final response shape, just no timeout cap.
+        _log(
+            f"    streaming response (model={self.model}, "
+            f"max_tokens={self.max_tokens})..."
+        )
+        chunk_count = 0
+        with self._client.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             system=system_payload,
             messages=[{"role": "user", "content": user_content}],
+        ) as stream:
+            # Consume the stream to drive it to completion. We don't print
+            # the text chunks (would flood the log with raw JSON); instead
+            # we print a dot every 200 chunks as a heartbeat. The dot is
+            # intentionally NOT timestamped — it's a single-character
+            # continuation on the same line.
+            for _ in stream.text_stream:
+                chunk_count += 1
+                if chunk_count % 200 == 0:
+                    print(".", end="", flush=True)
+            response = stream.get_final_message()
+        if chunk_count >= 200:
+            print()  # newline after dot heartbeat
+        _log(
+            f"    stream complete (chunks={chunk_count}, "
+            f"output_tokens={getattr(response.usage, 'output_tokens', '?')})"
         )
 
         if not response.content or response.content[0].type != "text":

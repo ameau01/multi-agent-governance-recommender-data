@@ -179,6 +179,25 @@ def _print_phase_preview(
     print()
 
 
+def _cmd_config() -> int:
+    """Print the currently-loaded operational configuration.
+
+    Shows each tunable parameter with its current value and where it came from
+    (`.env` or `(default)`). Useful for sanity-checking before a paid run.
+    """
+    from generator.constants import operational_config_summary
+    config = operational_config_summary()
+    print("=== Current operational config ===")
+    print(f"  {'PARAMETER':<32} {'VALUE':<35} SOURCE")
+    print(f"  {'-' * 32:<32} {'-' * 35:<35} ------")
+    for name, (value, source) in config.items():
+        print(f"  {name:<32} {str(value)[:35]:<35} {source}")
+    print()
+    print("To override any value, set the DATAGEN_<NAME> env var in .env.")
+    print("Example: DATAGEN_MAX_RETRIES=5 in .env would change MAX_RETRIES to 5.")
+    return 0
+
+
 def _confirm(message: str = "Proceed?") -> bool:
     """Ask for yes/no confirmation. Returns True on 'y' or 'yes' (case-insensitive)."""
     try:
@@ -436,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # ---------- Inspection commands ----------
+    sub.add_parser("config", help="Print currently-loaded operational parameters (from .env or defaults)")
+
     # ---------- Per-scenario commands ----------
     for cmd, _help in [
         ("build", "Build one scenario end-to-end"),
@@ -478,7 +500,9 @@ def main(argv: list[str] | None = None) -> int:
         "pass1-all", "pass2-all", "smoke-test-all", "smoke-test-judge-all",
         "validate-all", "build-all",
     )
-    if args.command in per_scenario_commands:
+    if args.command == "config":
+        return _cmd_config()
+    elif args.command in per_scenario_commands:
         return _run_scenario(args.command, args)
     elif args.command in phase_commands:
         # Strip "-all" suffix to get the phase name; build-all becomes "build"

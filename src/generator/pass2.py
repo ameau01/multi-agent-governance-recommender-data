@@ -36,6 +36,8 @@ from contracts import (
 from generator.checkpoint import checkpoint_path, write_pydantic_atomic
 from generator.constants import (
     INTERMEDIATES_DIR,
+    MAX_RETRIES,
+    PASS2_MAX_TOKENS,
     PASS2_MODEL,
     PASS2_PROMPT_PATH,
     RECORDS_PER_TIER,
@@ -57,8 +59,8 @@ _TIER_MODELS: dict[str, Type[BaseModel]] = {
     "network": NetworkRecord,
 }
 
-_MAX_RETRIES = 3
-_PASS2_MAX_TOKENS = 64000
+# Retry count and max output tokens are loaded from constants.py, which reads
+# them from .env (DATAGEN_MAX_RETRIES / DATAGEN_PASS2_MAX_TOKENS).
 
 
 # ============================================================
@@ -84,7 +86,7 @@ def generate_pass2(
 
     Raises:
         RuntimeError: if Pass 2 LLM call fails or invariance is violated
-                      after _MAX_RETRIES.
+                      after MAX_RETRIES.
     """
     intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
     correlations = spec.pass2_correlations or []
@@ -150,7 +152,7 @@ def _correlation_inject(
     intermediates_dir: Path,
 ) -> Pass2Output:
     """Call LLM with Pass 1 JSON + correlation rules. Validate invariance."""
-    client = LLMClient(model=PASS2_MODEL, max_tokens=_PASS2_MAX_TOKENS)
+    client = LLMClient(model=PASS2_MODEL, max_tokens=PASS2_MAX_TOKENS)
 
     # Affected tiers (those mentioned in any correlation effect)
     affected = _affected_tiers(spec)
@@ -159,7 +161,7 @@ def _correlation_inject(
     log_path = intermediates_dir / spec.scenario_id / "pass2_llm_log.json"
 
     last_error: Exception | None = None
-    for attempt in range(1, _MAX_RETRIES + 1):
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.call(
                 prompt_path=PASS2_PROMPT_PATH,
@@ -177,10 +179,10 @@ def _correlation_inject(
             return pass2
         except (json.JSONDecodeError, ValidationError, ValueError, AssertionError) as e:
             last_error = e
-            print(f"    Pass 2 attempt {attempt}/{_MAX_RETRIES} failed: {type(e).__name__}: {e}")
+            print(f"    Pass 2 attempt {attempt}/{MAX_RETRIES} failed: {type(e).__name__}: {e}")
 
     raise RuntimeError(
-        f"Pass 2 failed for scenario {spec.scenario_id} after {_MAX_RETRIES} attempts. "
+        f"Pass 2 failed for scenario {spec.scenario_id} after {MAX_RETRIES} attempts. "
         f"Last error: {last_error}"
     )
 

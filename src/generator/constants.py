@@ -1,11 +1,37 @@
 """Pipeline-wide constants.
 
-The sampling envelope and the day-mapping are fixed for the v1.0.0 contract.
-See `docs/internal/generation-conventions.md` §1 for the canonical definitions.
+This module mixes two kinds of values:
+
+  1. Architectural constants — hard-coded because they're part of the
+     contract (RECORDS_PER_TIER, DATA_WINDOW_START_UTC, INTERVAL_MINUTES,
+     ALL_SCENARIO_IDS, file paths). Changing these would break the
+     consumer; they should not be runtime-tunable.
+
+  2. Operational parameters — read from environment variables (with
+     defaults preserved as fallbacks). These are user-tunable per run:
+       - Model assignments (DATAGEN_PASS1_MODEL, etc.)
+       - Max output tokens (DATAGEN_PASS1_MAX_TOKENS, etc.)
+       - Temperature (DATAGEN_LLM_TEMPERATURE)
+       - Retry attempts (DATAGEN_MAX_RETRIES)
+       - Batch mode (DATAGEN_BATCH_MODE)
+
+The defaults match the user's decision logged in CHANGELOG: Sonnet 4.6 for
+Pass 1 and Pass 2, Opus 4.6 for smoke test recommendation, Haiku 4.5 for
+judge. Overriding any default is done by setting the env var in `.env` or
+in the shell before invoking the CLI.
+
+To inspect the currently-loaded operational parameters, run:
+    uv run python -m generator.cli config
 """
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env at module import time. Idempotent — safe to call multiple times.
+load_dotenv()
 
 # ============================================================
 # Sampling envelope (per docs/internal/generation-conventions.md §1)
@@ -51,47 +77,87 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 ALL_SCENARIO_IDS = [f"{i:02d}" for i in range(1, 19)]  # "01" through "18"
 
 # ============================================================
-# LLM configuration
+# LLM operational parameters (overridable via .env)
 # ============================================================
-# Model selection rationale (see BUILD_PLAN.md "Model strategy and cost" for
-# the full comparison):
+# All defaults reflect the user's decision logged in CHANGELOG:
+#   Pass 1 + Pass 2 → Sonnet 4.6
+#   Smoke test       → Opus 4.6
+#   Judge            → Haiku 4.5
 #
-#   Pass 1 → Sonnet 4.6     Telemetry generation needs reliable adherence to
-#                           ranges, time patterns, and the 11-of-14 rule. Sonnet's
-#                           instruction-following reduces Phase B iteration count
-#                           vs. Haiku, paying for itself in fewer prompt-tuning
-#                           cycles. ~$101 of the build budget.
-#
-#   Pass 2 → Sonnet 4.6     Pass 2 invariance (preserving Pass 1 bit-exact outside
-#                           correlation windows) demands precise rule-following on
-#                           large JSON inputs. Sonnet is the right tier here;
-#                           Haiku is too risky on invariance, Opus is overkill.
-#                           ~$54 of the build budget (with prompt caching).
-#
-#   Smoke test → Opus 4.6   Strongest available baseline check. If even Opus can't
-#                           solve a scenario in one call, the multi-agent system's
-#                           depth is genuinely needed (positive design signal).
-#                           ~$1.45 of the build budget — incremental cost over
-#                           Sonnet is trivial (~$0.58).
-#
-#   Judge → Haiku 4.5       One-line "substantively the same change? YES/NO".
-#                           Trivial reasoning, trivial cost. ~$0.01.
-#
-# Estimated total (with caching, no Batch API): ~$157 against $150 credit.
-# Estimated total (with caching + Batch API):   ~$79 — recommended path.
-# Set BATCH_MODE_ENV_VAR (DATAGEN_BATCH_MODE=true) to opt into Batch API once
-# Phase B.6 implements the batch code path.
+# To override any of these per-run, set the corresponding DATAGEN_* env var
+# in .env or in the shell before running the CLI. To inspect what's loaded
+# right now, run: `uv run python -m generator.cli config`.
 
-PASS1_MODEL = "claude-sonnet-4-6"
-PASS2_MODEL = "claude-sonnet-4-6"
-SMOKE_TEST_MODEL = "claude-opus-4-6"
-SMOKE_TEST_JUDGE_MODEL = "claude-haiku-4-5-20251001"
-LLM_TEMPERATURE = 0.3
+# Model assignments
+PASS1_MODEL = os.getenv("DATAGEN_PASS1_MODEL", "claude-sonnet-4-6")
+PASS2_MODEL = os.getenv("DATAGEN_PASS2_MODEL", "claude-sonnet-4-6")
+SMOKE_TEST_MODEL = os.getenv("DATAGEN_SMOKE_TEST_MODEL", "claude-opus-4-6")
+SMOKE_TEST_JUDGE_MODEL = os.getenv(
+    "DATAGEN_SMOKE_TEST_JUDGE_MODEL", "claude-haiku-4-5-20251001",
+)
 
-# Batch API configuration — applied once the batch code path lands (Phase B.6).
-# When BATCH_MODE_ENV_VAR is "true", the pipeline submits LLM calls via
-# Anthropic's Batches API at 50% of standard pricing. The 18-scenario build is
-# an asynchronous batch workload by nature (not interactive), so this is a
-# near-pure cost win. See BUILD_PLAN.md for the Phase B.6 task.
+# LLM call parameters
+LLM_TEMPERATURE = float(os.getenv("DATAGEN_LLM_TEMPERATURE", "0.3"))
+
+# Retry behavior — applies to per-tier Pass 1 and Pass 2 LLM calls.
+# Only retries on JSON parse / Pydantic validation / value errors;
+# AuthenticationError, RateLimitError, etc. propagate immediately.
+MAX_RETRIES = int(os.getenv("DATAGEN_MAX_RETRIES", "3"))
+
+# Max output tokens per LLM call, per phase
+# Note: PASS1_MAX_TOKENS is the OLD single-call value, kept for backwards
+# compat. The chunked design uses PASS1_CHUNK_MAX_TOKENS (each chunk = 1 day).
+PASS1_MAX_TOKENS = int(os.getenv("DATAGEN_PASS1_MAX_TOKENS", "64000"))
+PASS2_MAX_TOKENS = int(os.getenv("DATAGEN_PASS2_MAX_TOKENS", "64000"))
+SMOKE_TEST_MAX_TOKENS = int(os.getenv("DATAGEN_SMOKE_TEST_MAX_TOKENS", "4096"))
+JUDGE_MAX_TOKENS = int(os.getenv("DATAGEN_JUDGE_MAX_TOKENS", "50"))
+
+# Pass 1 day-chunked generation (smooth-generation design):
+# Each LLM call produces 96 records (one day) for one tier. 14 chunks per
+# tier per scenario. Each chunk fits well within max_tokens with headroom.
+PASS1_CHUNK_DAYS = int(os.getenv("DATAGEN_PASS1_CHUNK_DAYS", "1"))     # days per chunk
+PASS1_CHUNK_MAX_TOKENS = int(os.getenv("DATAGEN_PASS1_CHUNK_MAX_TOKENS", "16000"))
+PASS1_TEMPERATURE = float(os.getenv("DATAGEN_PASS1_TEMPERATURE", "0.2"))
+PASS2_TEMPERATURE = float(os.getenv("DATAGEN_PASS2_TEMPERATURE", "0.2"))
+INTER_CHUNK_DELAY_SEC = float(os.getenv("DATAGEN_INTER_CHUNK_DELAY_SEC", "0.5"))
+CHUNK_RETRY_BACKOFF_SEC = float(os.getenv("DATAGEN_CHUNK_RETRY_BACKOFF_SEC", "2.0"))
+
+# Anthropic SDK-level retry config. Bumped from default (2) to absorb
+# transient network blips, 5xx errors, and brief rate-limit windows.
+SDK_MAX_RETRIES = int(os.getenv("DATAGEN_SDK_MAX_RETRIES", "5"))
+
+# Batch API toggle (Phase B.6 deliverable)
 BATCH_MODE_ENV_VAR = "DATAGEN_BATCH_MODE"
 BATCH_MODE_DEFAULT = False
+
+
+def operational_config_summary() -> dict[str, object]:
+    """Return a dict of operational params with current values + sources.
+
+    Used by `cli.py:cmd_config` to print the running configuration.
+    """
+    def src(env_var: str) -> str:
+        return ".env" if os.getenv(env_var) is not None else "(default)"
+
+    return {
+        "PASS1_MODEL": (PASS1_MODEL, src("DATAGEN_PASS1_MODEL")),
+        "PASS2_MODEL": (PASS2_MODEL, src("DATAGEN_PASS2_MODEL")),
+        "SMOKE_TEST_MODEL": (SMOKE_TEST_MODEL, src("DATAGEN_SMOKE_TEST_MODEL")),
+        "SMOKE_TEST_JUDGE_MODEL": (SMOKE_TEST_JUDGE_MODEL, src("DATAGEN_SMOKE_TEST_JUDGE_MODEL")),
+        "LLM_TEMPERATURE": (LLM_TEMPERATURE, src("DATAGEN_LLM_TEMPERATURE")),
+        "PASS1_TEMPERATURE": (PASS1_TEMPERATURE, src("DATAGEN_PASS1_TEMPERATURE")),
+        "PASS2_TEMPERATURE": (PASS2_TEMPERATURE, src("DATAGEN_PASS2_TEMPERATURE")),
+        "MAX_RETRIES": (MAX_RETRIES, src("DATAGEN_MAX_RETRIES")),
+        "SDK_MAX_RETRIES": (SDK_MAX_RETRIES, src("DATAGEN_SDK_MAX_RETRIES")),
+        "PASS1_CHUNK_DAYS": (PASS1_CHUNK_DAYS, src("DATAGEN_PASS1_CHUNK_DAYS")),
+        "PASS1_CHUNK_MAX_TOKENS": (PASS1_CHUNK_MAX_TOKENS, src("DATAGEN_PASS1_CHUNK_MAX_TOKENS")),
+        "PASS2_MAX_TOKENS": (PASS2_MAX_TOKENS, src("DATAGEN_PASS2_MAX_TOKENS")),
+        "SMOKE_TEST_MAX_TOKENS": (SMOKE_TEST_MAX_TOKENS, src("DATAGEN_SMOKE_TEST_MAX_TOKENS")),
+        "JUDGE_MAX_TOKENS": (JUDGE_MAX_TOKENS, src("DATAGEN_JUDGE_MAX_TOKENS")),
+        "INTER_CHUNK_DELAY_SEC": (INTER_CHUNK_DELAY_SEC, src("DATAGEN_INTER_CHUNK_DELAY_SEC")),
+        "CHUNK_RETRY_BACKOFF_SEC": (CHUNK_RETRY_BACKOFF_SEC, src("DATAGEN_CHUNK_RETRY_BACKOFF_SEC")),
+        "DATAGEN_BATCH_MODE": (
+            os.getenv("DATAGEN_BATCH_MODE", "false").lower() in ("true", "1"),
+            src("DATAGEN_BATCH_MODE"),
+        ),
+    }

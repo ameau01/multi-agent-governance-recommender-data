@@ -9,37 +9,93 @@ that two tiers should be correlated, do NOT correlate them here. A subsequent
 pass adds correlations surgically; if you bake correlations into this pass,
 the next pass cannot reliably preserve your work.
 
-USER:
-You will generate Pass 1 (base time-series) for a cloud governance scenario.
+You will be asked to generate ONE DAY of records (96 records, 15-min intervals)
+for ONE specific tier at a time. Other tiers in your output stay as [].
 
-TIME-PATTERN RULES:
-- Window: 1,344 records per non-empty tier, 15-minute intervals.
-- Start timestamp: 2026-05-01T00:00:00Z (UTC).
-- Day mapping in this window:
-  - Weekdays: 2026-05-01, 04, 05, 06, 07, 08, 11, 12, 13, 14 (10 days).
-  - Weekends: 2026-05-02, 03, 09, 10 (4 days).
-- "Business hours" = 09:00–18:00 local-equivalent (treat as UTC for this
-  dataset).
+USER:
+You will generate one day's worth of base time-series records for one tier.
+
+PRECEDENCE OF SHAPE INSTRUCTIONS (highest to lowest — this is authoritative):
+  1. PER-METRIC PATTERN OVERRIDES (defined below). If the PASS 1 METRIC RANGES
+     block specifies a `pattern` for a metric, that pattern controls the metric's
+     temporal shape, FULLY REPLACING the default TIME-PATTERN RULES for that metric.
+     Each metric is evaluated independently — one metric may have a pattern
+     override while a sibling metric falls back to defaults.
+  2. SCENARIO BEHAVIORAL NOTES (in the per-call block below). Narrative cues
+     about "no spikes", "no business-hours variation", "ramp up on day 7", etc.,
+     refine the shape further inside the constraints from rule 1.
+  3. TIME-PATTERN RULES (the defaults at the bottom of this section). These
+     apply ONLY when neither rule 1 nor rule 2 says otherwise for a given metric.
+
+PER-METRIC PATTERN OVERRIDES — recognized values and their behaviors:
+
+  flat_all_days
+    NO business-hours bump. NO weekday/weekend variation. Values fluctuate
+    only within the declared range with small random noise — no diurnal,
+    weekly, or recurring structure. Weekend mean stays within ±5% of
+    weekday mean, business-hours mean stays within ±5% of off-hours mean.
+
+  flat_with_minor_weekday_variation
+    Like flat_all_days, but with up to ±5–8% drift between weekdays. Still
+    no business-hours bump, still no weekend dip beyond noise.
+
+  business_hours_peaks_weekdays_only
+    Strong elevation during 09:00–18:00 UTC on weekdays (1.5–2.5x off-hours
+    on the same day). Weekends remain at off-hours baseline across all 24h.
+
+  business_hours_drops_weekdays_only
+    Inverse — the metric DROPS during business hours on weekdays (e.g., cache
+    hit ratio that falls under load). Weekends flat at off-hours baseline.
+
+  weekday_business_hours_elevated
+    Modest elevation during business hours on weekdays (1.2–1.5x off-hours).
+    Weekend mean roughly 40–60% of weekday mean.
+
+  weekday_business_hours_slight_drop
+    Slight drop during business hours on weekdays (~10–20% below off-hours).
+    Weekend behavior follows the criticality defaults below.
+
+  weekday_business_baseline_plus_two_spikes
+    Weekday off-hours baseline with TWO distinct daily spikes (typical timing
+    around 12:00 and 17:00 UTC, each lasting ~30–60 minutes). Weekends flat
+    at baseline.
+
+  weekday_bimodal_peak_hours_only
+    Two clearly separated peaks during weekday business hours with a quieter
+    valley between them. Weekends flat at off-hours baseline.
+
+If the pattern value is not in this recognized list, interpret the literal string
+as a free-form description (e.g., "heavy use during peak hours, very light
+otherwise") and follow it as written.
+
+TIME-PATTERN RULES (DEFAULTS — apply only to metrics with NO pattern override):
+- 15-minute intervals, EXACTLY 96 records per day.
+- Each record's timestamp is the specified day's date + 00:00:00Z, 00:15:00Z, ...
+  through 23:45:00Z. 96 records total.
+- Full 14-day window context (for understanding the scenario, not for output):
+  - Weekday dates: 2026-05-01, 04, 05, 06, 07, 08, 11, 12, 13, 14 (10 days).
+  - Weekend dates: 2026-05-02, 03, 09, 10 (4 days).
+- "Business hours" = 09:00–18:00 UTC.
 - For production-facing services (tier-1, tier-2), weekend metric averages
   should be 40–60% of weekday averages unless the scenario states otherwise.
 - For internal services (tier-3), weekend averages should be 10–25% of weekday.
 - "Healthy" never means zero activity — weekend traffic stays above the
   metric's lower healthy bound.
-- Recurring patterns (business-hours peaks, daily spikes, etc.) must hold on
-  at least 11 of 14 days. For weekday-only patterns, must hold on all 10
-  weekday dates above.
+- When the scenario specifies a recurring pattern, you are producing ONE DAY of
+  that pattern. The pattern type for THIS day is given in the CHUNK CONTEXT below.
 
 HEALTHY BASELINES (use these for any metric not overridden by the scenario):
 {healthy_baselines_block}
 
 CROSS-TIER CORRELATION:
-None at this pass. Generate each tier independently. The next pass will add
+None at this pass. Generate this tier independently. The next pass adds
 correlations if the scenario calls for them.
 
 OUTPUT SCHEMA (strict):
 {{
   "scenario_id": "<from the SCENARIO heading below>",
   "pass": 1,
+  "day": "<the date for this chunk, e.g. 2026-05-08>",
   "Compute_Metrics": [
     {{
       "timestamp": "...",
@@ -51,7 +107,7 @@ OUTPUT SCHEMA (strict):
       "application_p95_latency_ms": 0.0,
       "instance_id": null
     }},
-    ...
+    ...  (exactly 96 entries if tier=compute, else [])
   ],
   "Database_Metrics": [
     {{
@@ -62,7 +118,7 @@ OUTPUT SCHEMA (strict):
       "db_cache_hit_ratio": 0.0,
       "db_io_wait_p95": 0.0
     }},
-    ...
+    ...  (exactly 96 entries if tier=database, else [])
   ],
   "Cache_Metrics": [
     {{
@@ -72,7 +128,7 @@ OUTPUT SCHEMA (strict):
       "cache_memory_used_pct": 0.0,
       "cache_connections": 0
     }},
-    ...
+    ...  (exactly 96 entries if tier=cache, else [])
   ],
   "Network_Metrics": [
     {{
@@ -81,22 +137,19 @@ OUTPUT SCHEMA (strict):
       "network_error_rate": 0.0,
       "network_throughput_p95": 0.0
     }},
-    ...
+    ...  (exactly 96 entries if tier=network, else [])
   ]
 }}
 
 REQUIREMENTS:
-- For any tier NOT in the "Tiers required" list (in the per-scenario section
-  below), output an empty array `[]`.
-- Every non-empty tier array must contain exactly 1,344 records.
-- Timestamps must be exact 15-minute increments from 2026-05-01T00:00:00Z.
-- Timestamps must align index-by-index across all non-empty tier arrays.
-- All numeric values must fall within the ranges stated in the per-scenario
-  PASS 1 METRIC RANGES section.
+- Output EXACTLY 96 records for the tier listed below, all timestamped on the
+  specified day. For all other tiers, output [].
+- Timestamps must be the specified day at 00:00:00Z, 00:15:00Z, ..., 23:45:00Z.
+- All numeric values must fall within the ranges stated in PASS 1 METRIC RANGES.
 - Use one decimal place for percentages and latencies; integers for counts.
 - For Scenario 5 (Load Balancer Inefficiency) only: emit per-instance compute
-  records with `instance_id` populated ("i-001" through "i-N"); the total
-  record count becomes 1344 × N instead of 1344.
+  records with `instance_id` populated. The chunk you generate is for ONE
+  instance specified in the CHUNK CONTEXT.
 
 Output the JSON only. No prose, no markdown, no surrounding text.
 
@@ -104,15 +157,25 @@ Output the JSON only. No prose, no markdown, no surrounding text.
 
 SCENARIO {scenario_id}: {scenario_name}
 Type: {scenario_type}
-Tiers required (emit non-empty arrays for these only): {tiers_required}
+Tier required: {tiers_required}
 
 BUSINESS CONTEXT:
 {business_context_description}
 SLA: {sla_target_description}
 Criticality: {criticality}
 
+SCENARIO BEHAVIORAL NOTES (narrative cue — refines shape inside the per-metric pattern constraints):
+{scenario_behavioral_notes}
+
 CURRENT CONFIGURATION (informational — drives realism, not directly emitted):
 {tier_topology_description}
 
-PASS 1 METRIC RANGES (this is your job to satisfy):
+PASS 1 METRIC RANGES (for this tier):
 {pass1_metrics_block}
+
+CHUNK CONTEXT:
+This call is for DAY {day_index} of 14.
+Date:           {day_date}
+Day of week:    {day_of_week}
+Period type:    {day_period_type}
+Output records: exactly 96, all timestamped on {day_date} from 00:00:00Z to 23:45:00Z.

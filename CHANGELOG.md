@@ -10,6 +10,58 @@ This is a project changelog (planning and implementation milestones), not a rele
 
 Phase A — Foundations work begins here.
 
+### Migrated — Tunable parameters now read from .env (2026-05-26)
+
+The following parameters are now overridable via `DATAGEN_*` env vars in `.env`,
+with their previous hardcoded values as defaults:
+
+- `DATAGEN_PASS1_MODEL` (default: claude-sonnet-4-6)
+- `DATAGEN_PASS2_MODEL` (default: claude-sonnet-4-6)
+- `DATAGEN_SMOKE_TEST_MODEL` (default: claude-opus-4-6)
+- `DATAGEN_SMOKE_TEST_JUDGE_MODEL` (default: claude-haiku-4-5-20251001)
+- `DATAGEN_LLM_TEMPERATURE` (default: 0.3)
+- `DATAGEN_MAX_RETRIES` (default: 3 — only applies to content failures, not auth)
+- `DATAGEN_PASS1_MAX_TOKENS` (default: 64000)
+- `DATAGEN_PASS2_MAX_TOKENS` (default: 64000)
+- `DATAGEN_SMOKE_TEST_MAX_TOKENS` (default: 4096)
+- `DATAGEN_JUDGE_MAX_TOKENS` (default: 50)
+- `DATAGEN_BATCH_MODE` (default: false)
+
+`src/generator/constants.py` is now the single source of truth — reads from
+env at module import, exposes constants the rest of the codebase imports.
+New CLI command `uv run python -m generator.cli config` prints the currently-
+loaded values + whether each came from `.env` or default.
+
+`.env.example` updated with all DATAGEN_* vars commented out (so the defaults
+apply unless explicitly overridden). Architectural constants (RECORDS_PER_TIER,
+DATA_WINDOW_START_UTC, INTERVAL_MINUTES) stay hardcoded — they're contract
+invariants, not user-tunable.
+
+### Added — .env safeguard tooling + commitment (2026-05-26)
+
+After accidentally clobbering the user's `.env` during an earlier .gitignore
+test (the contents were replaced with a 22-char placeholder `sk-ant-real-
+secret-key` and not noticed until the auth error surfaced), added safeguards:
+
+- `bin/check_env.sh` — validates `.env` length/prefix without exposing values.
+  Checks that ANTHROPIC_API_KEY is real (not a placeholder, ≥50 chars,
+  starts with `sk-ant-`), LANGSMITH_API_KEY is plausible if tracing is on.
+  Returns non-zero exit code on failure with clear remediation guidance.
+  Recommended to run before any paid command.
+- Documented commitment in this CHANGELOG: assistant will not Write, Edit,
+  copy, mv, cp, or echo into `.env` going forward. All future env-var
+  testing is done via mocked `os.environ` inside Python test scopes,
+  never by touching the user's `.env` file.
+
+### Fixed — Anthropic SDK streaming requirement (2026-05-26)
+
+`LLMClient.call()` was using `messages.create()`, which the Anthropic SDK
+refuses for requests that may exceed 10 minutes (Pass 1 with
+max_tokens=64000 hits this). Switched to `messages.stream()` with
+`stream.get_final_message()`. Same response shape, no behavioral change,
+no timeout cap. Added a heartbeat (`.` every 200 chunks) so long-running
+Sonnet calls show progress in the log.
+
 ### Decided — Model assignments (2026-05-25)
 
 Final model choices for the build, wired into `src/generator/constants.py`:

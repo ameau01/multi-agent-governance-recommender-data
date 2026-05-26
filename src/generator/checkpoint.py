@@ -224,3 +224,95 @@ def checkpoint_path(scenario_id: str, phase: str, intermediates_dir: Path) -> Pa
 def usage_path(scenario_id: str, phase: str, intermediates_dir: Path) -> Path:
     """Canonical path for a per-scenario per-phase usage/cost log."""
     return intermediates_dir / scenario_id / f"{phase}.usage.json"
+
+
+# ============================================================
+# Chunk-aware helpers (Pass 1 day-chunked generation)
+# ============================================================
+def chunk_checkpoint_path(
+    scenario_id: str,
+    phase: str,
+    tier: str,
+    chunk_index: int,
+    intermediates_dir: Path,
+) -> Path:
+    """Canonical path for a per-chunk checkpoint file.
+
+    Example: intermediates/01/pass1_compute_day03.json (zero-padded 2 digits).
+    """
+    return (
+        intermediates_dir / scenario_id
+        / f"{phase}_{tier}_day{chunk_index:02d}.json"
+    )
+
+
+def chunk_llm_log_path(
+    scenario_id: str,
+    phase: str,
+    tier: str,
+    chunk_index: int,
+    intermediates_dir: Path,
+) -> Path:
+    """LLM log file path for one chunk."""
+    return (
+        intermediates_dir / scenario_id
+        / f"{phase}_{tier}_day{chunk_index:02d}_llm_log.json"
+    )
+
+
+@dataclass(frozen=True)
+class ChunkPartition:
+    """Per-tier partition of day-chunks into (completed, remaining)."""
+
+    tier: str
+    completed: list[int]                       # day indices [0..13] with valid checkpoints
+    remaining: list[int]                       # day indices that need to run
+
+    @property
+    def total(self) -> int:
+        return len(self.completed) + len(self.remaining)
+
+    @property
+    def all_complete(self) -> bool:
+        return len(self.remaining) == 0
+
+
+def partition_chunks(
+    scenario_id: str,
+    phase: str,
+    tier: str,
+    days: int,
+    intermediates_dir: Path,
+) -> ChunkPartition:
+    """For one (scenario, phase, tier), partition days into (completed, remaining).
+
+    A day is complete if its chunk file exists, is non-empty, and contains
+    valid JSON. Pydantic validation of contents is the caller's responsibility
+    (different per tier).
+
+    Args:
+        scenario_id: e.g. "01".
+        phase: typically "pass1".
+        tier: "compute" / "database" / "cache" / "network".
+        days: total number of day-chunks expected (typically 14).
+        intermediates_dir: repo's intermediates/ directory.
+
+    Returns:
+        ChunkPartition with completed + remaining day indices.
+    """
+    completed: list[int] = []
+    remaining: list[int] = []
+    for day_index in range(days):
+        path = chunk_checkpoint_path(
+            scenario_id, phase, tier, day_index, intermediates_dir,
+        )
+        if path.exists() and path.stat().st_size > 0:
+            try:
+                # Quick JSON validity check (content validation is caller's job)
+                read_json(path)
+                completed.append(day_index)
+            except json.JSONDecodeError:
+                remaining.append(day_index)
+        else:
+            remaining.append(day_index)
+    return ChunkPartition(tier=tier, completed=completed, remaining=remaining)

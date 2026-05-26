@@ -1,27 +1,57 @@
-"""Pass 1 generator — base time-series per tier.
+"""Pass 1 generator — day-chunked base telemetry per tier.
 
-Strategy: ONE LLM call per active tier (not one call for all four tiers at
-once). For each call, ask for 1344 records for the requested tier and empty
-arrays for the others. This bounds per-call output size to ~50-95K tokens
-(within Sonnet 4.6's 64K output limit for most scenarios).
+Strategy: ONE LLM call per (tier, day) chunk. Each call generates exactly
+96 records for one tier on one specific day, well within Sonnet 4.6's
+16K-per-chunk output budget.
 
-Known limitation: Scenario 5 (per-instance compute, 10752 records) exceeds
-the single-call budget. Per-instance chunking is a future enhancement;
-flagged with a clear warning when encountered.
+For each scenario:
+  For each active tier in the topology:
+    For each of 14 days (PASS1_CHUNK_DAYS=1):
+      - Check if intermediates/NN/pass1_<tier>_day<NN>.json exists
+        (skip if so — resume support per chunk)
+      - Call LLM with chunk-specific prompt (1 day + 1 tier)
+      - Validate 96 records against Pydantic
+      - Save chunk checkpoint atomically
+      - Per-chunk retry up to MAX_RETRIES
+      - Inter-chunk delay to be gentle on rate limits
+    Concatenate 14 days into one 1344-record tier array
+  Aggregate tier arrays into Pass1Output, persist to intermediates/NN/pass1.json
 
-Validation: each emitted record is validated against the corresponding
-Pydantic record class (ComputeRecord, DatabaseRecord, etc.). Timestamps
-must be exactly 15 minutes apart starting from DATA_WINDOW_START_UTC.
-Up to 3 retry attempts on parse or validation failure.
+Why chunked:
+  - Each call's output is ~9K tokens (vs ~128K for single-call), no truncation
+  - Per-chunk granularity for retry, recovery from interrupt, progress visibility
+  - Prompt caching pays off massively: SYSTEM + USER boilerplate identical
+    across all 14 chunks of one tier, so 1 cache write + 13 reads (≈70% savings on input)
+  - Works on Haiku, Sonnet, Opus (all support ≥16K output)
 
-See docs/internal/generation-methodology.md §2 for the full Pass 1 contract.
+Scenario 5 (per-instance compute) caveat:
+  Currently emits per-instance records in a single per-day chunk (768 records
+  per day across 8 instances). This exceeds 16K output. Special-case handling
+  is a future enhancement; flagged with a warning when encountered.
+
+See docs/internal/generation-methodology.md §2.
 """
 
 from __future__ import annotations
 import json
-from datetime import timedelta
+import sys
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Type
+
+
+def _log(msg: str = "", *, end: str = "\n") -> None:
+    """Print one progress line prefixed with [HH:MM:SS], always flushed.
+
+    Plain-print fallback for empty / whitespace-only lines so we don't pollute
+    spacing with stamps where they aren't helpful.
+    """
+    if not msg.strip():
+        print(msg, end=end, flush=True)
+        return
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] {msg}", end=end, flush=True)
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -32,14 +62,28 @@ from contracts import (
     DatabaseRecord,
     NetworkRecord,
 )
-from generator.checkpoint import checkpoint_path, write_pydantic_atomic
+from generator.checkpoint import (
+    chunk_checkpoint_path,
+    chunk_llm_log_path,
+    checkpoint_path,
+    partition_chunks,
+    read_json,
+    write_json_atomic,
+    write_pydantic_atomic,
+)
 from generator.constants import (
+    CHUNK_RETRY_BACKOFF_SEC,
+    DATA_WINDOW_DAYS,
     DATA_WINDOW_START_UTC,
     HEALTHY_BASELINES_PATH,
     INTERMEDIATES_DIR,
     INTERVAL_MINUTES,
+    INTER_CHUNK_DELAY_SEC,
+    MAX_RETRIES,
+    PASS1_CHUNK_MAX_TOKENS,
     PASS1_MODEL,
     PASS1_PROMPT_PATH,
+    PASS1_TEMPERATURE,
     RECORDS_PER_TIER,
 )
 from generator.llm_client import LLMClient
@@ -60,8 +104,8 @@ _TIER_KEYS = {
     "network": "Network_Metrics",
 }
 
-_MAX_RETRIES = 3
-_PASS1_MAX_TOKENS = 64000
+_RECORDS_PER_DAY = 96  # 24 * 4 (15-min intervals)
+_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 def active_tiers(spec: ScenarioSpec) -> list[str]:
@@ -72,41 +116,51 @@ def active_tiers(spec: ScenarioSpec) -> list[str]:
     ]
 
 
+# ============================================================
+# Public API: generate Pass 1 for one scenario
+# ============================================================
 def generate_pass1(
     spec: ScenarioSpec,
     *,
     intermediates_dir: Path | None = None,
 ) -> Pass1Output:
-    """Run Pass 1 for one scenario, one tier at a time.
+    """Run Pass 1 for one scenario, chunked per (tier, day).
+
+    Each (tier, day) chunk is checkpointed independently. Re-running this
+    function after an interruption re-uses any chunks that completed
+    successfully — only missing/corrupt chunks get re-generated.
 
     Args:
         spec: Loaded scenario spec.
-        intermediates_dir: Where per-call LLM logs go. Defaults to INTERMEDIATES_DIR.
+        intermediates_dir: Where chunks and LLM logs go. Defaults to INTERMEDIATES_DIR.
 
     Returns:
-        Pass1Output with one or more tier arrays populated (1344 records each),
-        and the remaining tier arrays as [].
+        Pass1Output with tier arrays filled (1344 records each) for active tiers.
 
     Raises:
-        RuntimeError: if Pass 1 fails for any tier after 3 retries.
+        RuntimeError: if a chunk fails all MAX_RETRIES attempts.
     """
     intermediates_dir = intermediates_dir or INTERMEDIATES_DIR
     if spec.scenario_id == "05":
-        print(
-            "  WARNING: Scenario 05 emits per-instance compute records (10752 total). "
-            "This exceeds Sonnet 4.6's 64K output token limit in a single call. "
-            "Pass 1 may fail; per-instance chunking is needed (future enhancement)."
+        _log(
+            "  WARNING: Scenario 05 emits per-instance compute records. The current "
+            "day-chunked Pass 1 generates one chunk per (tier, day); for Scenario 05 "
+            "that's 768 records (8 instances × 96 timestamps) ≈ 73K tokens, exceeding "
+            "the 16K chunk budget. Per-instance chunking is a future enhancement; "
+            "Pass 1 for Scenario 05 may fail at chunk validation. Other scenarios are fine."
         )
 
-    client = LLMClient(model=PASS1_MODEL, max_tokens=_PASS1_MAX_TOKENS)
+    client = LLMClient(
+        model=PASS1_MODEL,
+        max_tokens=PASS1_CHUNK_MAX_TOKENS,
+        temperature=PASS1_TEMPERATURE,
+    )
     healthy_baselines = HEALTHY_BASELINES_PATH.read_text(encoding="utf-8")
 
     tiers = active_tiers(spec)
     if not tiers:
         raise ValueError(f"Scenario {spec.scenario_id}: no active tiers in tier_topology")
 
-    # Each tier becomes its own LLM call. Per-tier results are slotted into
-    # the combined Pass1Output. Tiers not in `tiers` stay as [].
     arrays: dict[str, list[dict]] = {
         "Compute_Metrics": [],
         "Database_Metrics": [],
@@ -114,8 +168,9 @@ def generate_pass1(
         "Network_Metrics": [],
     }
     for tier in tiers:
-        print(f"  Pass 1 [{spec.scenario_id}] {tier}: requesting {RECORDS_PER_TIER} records...")
-        records = _generate_single_tier(
+        _log("")
+        _log(f"  ===== Pass 1 [{spec.scenario_id}] tier={tier} =====")
+        records = _generate_tier_chunked(
             client=client,
             spec=spec,
             tier=tier,
@@ -123,7 +178,7 @@ def generate_pass1(
             intermediates_dir=intermediates_dir,
         )
         arrays[_TIER_KEYS[tier]] = [r.model_dump(mode="json") for r in records]
-        print(f"  Pass 1 [{spec.scenario_id}] {tier}: ✓ {len(records)} records validated")
+        _log(f"  ===== Pass 1 [{spec.scenario_id}] tier={tier}: ✓ {len(records)} records aggregated =====")
 
     return Pass1Output(
         scenario_id=spec.scenario_id,
@@ -134,7 +189,10 @@ def generate_pass1(
     )
 
 
-def _generate_single_tier(
+# ============================================================
+# Tier-level: loop 14 days, with resume support
+# ============================================================
+def _generate_tier_chunked(
     *,
     client: LLMClient,
     spec: ScenarioSpec,
@@ -142,14 +200,97 @@ def _generate_single_tier(
     healthy_baselines: str,
     intermediates_dir: Path,
 ) -> list[BaseModel]:
-    """One LLM call for one tier. Up to _MAX_RETRIES on failure."""
-    substitutions = _build_substitutions(
-        spec, tiers_required=tier, healthy_baselines_block=healthy_baselines,
+    """Generate 14 day-chunks for one tier, with per-chunk resume."""
+    model_cls = _TIER_MODELS[tier]
+
+    # Resume: detect which days are already checkpointed
+    partition = partition_chunks(
+        scenario_id=spec.scenario_id,
+        phase="pass1",
+        tier=tier,
+        days=DATA_WINDOW_DAYS,
+        intermediates_dir=intermediates_dir,
     )
-    log_path = intermediates_dir / spec.scenario_id / f"pass1_{tier}_llm_log.json"
+    if partition.completed:
+        _log(
+            f"  Resume: {len(partition.completed)} day(s) already checkpointed, "
+            f"{len(partition.remaining)} day(s) remaining"
+        )
+
+    # Generate any remaining chunks
+    for day_index in partition.remaining:
+        _log(f"  Day {day_index + 1}/{DATA_WINDOW_DAYS}: generating chunk for tier={tier}...")
+        records = _generate_chunk_with_retry(
+            client=client,
+            spec=spec,
+            tier=tier,
+            day_index=day_index,
+            healthy_baselines=healthy_baselines,
+            intermediates_dir=intermediates_dir,
+        )
+        # Atomically save the chunk checkpoint
+        chunk_path = chunk_checkpoint_path(
+            spec.scenario_id, "pass1", tier, day_index, intermediates_dir,
+        )
+        write_json_atomic(
+            chunk_path,
+            [r.model_dump(mode="json") for r in records],
+        )
+        _log(f"  Day {day_index + 1}/{DATA_WINDOW_DAYS}: ✓ saved {chunk_path.name}")
+        if INTER_CHUNK_DELAY_SEC > 0:
+            time.sleep(INTER_CHUNK_DELAY_SEC)
+
+    # Load + aggregate all 14 days in order
+    all_records: list[BaseModel] = []
+    for day_index in range(DATA_WINDOW_DAYS):
+        chunk_path = chunk_checkpoint_path(
+            spec.scenario_id, "pass1", tier, day_index, intermediates_dir,
+        )
+        raw = read_json(chunk_path)
+        records = [model_cls.model_validate(r) for r in raw]
+        if len(records) != _RECORDS_PER_DAY:
+            raise RuntimeError(
+                f"Chunk {chunk_path.name} has {len(records)} records, expected {_RECORDS_PER_DAY}"
+            )
+        all_records.extend(records)
+
+    # Sanity check: total record count
+    expected_total = RECORDS_PER_TIER
+    if spec.scenario_id == "05" and tier == "compute":
+        expected_total = 8 * RECORDS_PER_TIER
+    if len(all_records) != expected_total:
+        raise RuntimeError(
+            f"Aggregated {tier} record count: {len(all_records)}, expected {expected_total}"
+        )
+
+    return all_records
+
+
+# ============================================================
+# Chunk-level: one LLM call with retries
+# ============================================================
+def _generate_chunk_with_retry(
+    *,
+    client: LLMClient,
+    spec: ScenarioSpec,
+    tier: str,
+    day_index: int,
+    healthy_baselines: str,
+    intermediates_dir: Path,
+) -> list[BaseModel]:
+    """One LLM call for one (tier, day) chunk. Up to MAX_RETRIES attempts."""
+    substitutions = _build_chunk_substitutions(
+        spec=spec,
+        tier=tier,
+        day_index=day_index,
+        healthy_baselines_block=healthy_baselines,
+    )
+    log_path = chunk_llm_log_path(
+        spec.scenario_id, "pass1", tier, day_index, intermediates_dir,
+    )
 
     last_error: Exception | None = None
-    for attempt in range(1, _MAX_RETRIES + 1):
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.call(
                 prompt_path=PASS1_PROMPT_PATH,
@@ -159,108 +300,100 @@ def _generate_single_tier(
                     "scenario_id": spec.scenario_id,
                     "phase": "pass1",
                     "tier": tier,
+                    "day_index": day_index,
                     "attempt": attempt,
                 },
             )
-            return _parse_and_validate_tier(response, tier, spec.scenario_id)
+            return _parse_and_validate_chunk(
+                response, tier=tier, day_index=day_index, scenario_id=spec.scenario_id,
+            )
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
             last_error = e
-            print(f"    attempt {attempt}/{_MAX_RETRIES} failed: {type(e).__name__}: {e}")
+            _log(
+                f"      chunk day {day_index + 1}/{DATA_WINDOW_DAYS} attempt "
+                f"{attempt}/{MAX_RETRIES} failed: {type(e).__name__}: {e}"
+            )
+            if attempt < MAX_RETRIES:
+                if CHUNK_RETRY_BACKOFF_SEC > 0:
+                    time.sleep(CHUNK_RETRY_BACKOFF_SEC)
 
     raise RuntimeError(
-        f"Pass 1 failed for scenario {spec.scenario_id} tier {tier} "
-        f"after {_MAX_RETRIES} attempts. Last error: {last_error}"
+        f"Pass 1 chunk failed: scenario {spec.scenario_id} tier {tier} "
+        f"day {day_index + 1}/{DATA_WINDOW_DAYS} after {MAX_RETRIES} attempts. "
+        f"Last error: {last_error}"
     )
 
 
-def _parse_and_validate_tier(
-    response: str, tier: str, scenario_id: str,
+def _parse_and_validate_chunk(
+    response: str, *, tier: str, day_index: int, scenario_id: str,
 ) -> list[BaseModel]:
-    """Parse the JSON response, extract this tier's array, validate every record."""
+    """Parse the chunk's JSON response, extract this tier's records, validate."""
     data = json.loads(response)
     tier_key = _TIER_KEYS[tier]
     raw = data.get(tier_key)
     if not isinstance(raw, list):
         raise ValueError(
-            f"Scenario {scenario_id} {tier}: expected {tier_key} to be a list, "
-            f"got {type(raw).__name__}"
+            f"Scenario {scenario_id} {tier} day {day_index}: expected "
+            f"{tier_key} to be a list, got {type(raw).__name__}"
         )
-    expected_count = RECORDS_PER_TIER
-    if scenario_id == "05" and tier == "compute":
-        # Per-instance compute records: N instances × 1344 timestamps
-        compute_count = spec_compute_instance_count(scenario_id)
-        expected_count = compute_count * RECORDS_PER_TIER
-    if len(raw) != expected_count:
+    if len(raw) != _RECORDS_PER_DAY:
         raise ValueError(
-            f"Scenario {scenario_id} {tier}: expected {expected_count} records, "
-            f"got {len(raw)}"
+            f"Scenario {scenario_id} {tier} day {day_index}: expected "
+            f"{_RECORDS_PER_DAY} records, got {len(raw)}"
         )
     model_cls = _TIER_MODELS[tier]
     records = [model_cls.model_validate(r) for r in raw]
-    _verify_timestamps(records, tier, scenario_id)
+    _verify_chunk_timestamps(records, tier=tier, day_index=day_index, scenario_id=scenario_id)
     return records
 
 
-def spec_compute_instance_count(scenario_id: str) -> int:
-    """For Scenario 5, return the number of compute instances. Defaults to 8."""
-    if scenario_id == "05":
-        return 8
-    return 1
-
-
-def _verify_timestamps(records: list, tier: str, scenario_id: str) -> None:
-    """Confirm 15-minute monotonic timestamps starting at DATA_WINDOW_START_UTC.
-
-    For Scenario 5 per-instance records, expect groups of N records sharing
-    each timestamp (one per instance) — checked as: timestamps repeat in
-    blocks of N where N = compute_instance_count.
-    """
-    if scenario_id == "05" and tier == "compute":
-        # Per-instance records: every N consecutive records share a timestamp,
-        # then the next N have the next timestamp 15min later.
-        instance_count = spec_compute_instance_count(scenario_id)
-        expected = DATA_WINDOW_START_UTC
-        for i in range(0, len(records), instance_count):
-            block = records[i : i + instance_count]
-            for r in block:
-                if r.timestamp != expected:
-                    raise ValueError(
-                        f"Scenario {scenario_id} {tier} [{i}]: timestamp {r.timestamp} "
-                        f"!= expected {expected}"
-                    )
-            expected += timedelta(minutes=INTERVAL_MINUTES)
-        return
-
-    expected = DATA_WINDOW_START_UTC
+def _verify_chunk_timestamps(
+    records: list[BaseModel], *, tier: str, day_index: int, scenario_id: str,
+) -> None:
+    """Each chunk's 96 records have timestamps for one specific day."""
+    day_start = DATA_WINDOW_START_UTC + timedelta(days=day_index)
+    expected = day_start
     for i, r in enumerate(records):
-        if r.timestamp != expected:
+        # Pydantic deserializes 'Z' suffix to UTC datetime; compare aware datetimes
+        ts = r.timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts != expected:
             raise ValueError(
-                f"Scenario {scenario_id} {tier} [{i}]: timestamp {r.timestamp} "
-                f"!= expected {expected}"
+                f"Scenario {scenario_id} {tier} day {day_index + 1} record [{i}]: "
+                f"timestamp {r.timestamp} != expected {expected}"
             )
         expected += timedelta(minutes=INTERVAL_MINUTES)
 
 
 # ============================================================
-# Substitution builders (per-prompt placeholder values)
+# Substitution builder (per chunk)
 # ============================================================
-def _build_substitutions(
-    spec: ScenarioSpec,
+def _build_chunk_substitutions(
     *,
-    tiers_required: str,
+    spec: ScenarioSpec,
+    tier: str,
+    day_index: int,
     healthy_baselines_block: str,
 ) -> dict[str, object]:
-    """Build the dict passed to LLMClient.call()'s substitutions parameter.
+    """Build the dict passed to LLMClient.call()'s substitutions parameter for one chunk."""
+    day_date_obj = DATA_WINDOW_START_UTC.date() + timedelta(days=day_index)
+    day_date_str = day_date_obj.isoformat()
+    weekday_index = day_date_obj.weekday()  # Monday=0
+    day_of_week_name = _WEEKDAY_NAMES[weekday_index]
+    is_weekend = weekday_index >= 5
+    period_type = "weekend day" if is_weekend else "weekday business day"
 
-    `tiers_required` is a single tier name (e.g. "compute"). The prompt
-    tells the LLM to emit non-empty arrays only for tiers listed here.
-    """
     bc = spec.business_context or {}
+    narrative = spec.narrative or {}
+    behavioral_notes = (narrative.get("what_this_demonstrates") or "").strip()
+    if not behavioral_notes:
+        behavioral_notes = "(no narrative cue provided)"
     return {
         "scenario_id": spec.scenario_id,
         "scenario_name": spec.scenario_name,
         "scenario_type": spec.scenario_type,
-        "tiers_required": tiers_required,
+        "tiers_required": tier,
         "business_context_description": bc.get("description", ""),
         "sla_target_description": bc.get(
             "sla_target_description",
@@ -268,9 +401,15 @@ def _build_substitutions(
             f"P95 < {bc.get('sla_target_p95_ms', 500)}ms",
         ),
         "criticality": bc.get("criticality", "tier-2"),
+        "scenario_behavioral_notes": behavioral_notes,
         "tier_topology_description": _format_tier_topology(spec),
-        "pass1_metrics_block": _format_pass1_metrics(spec, tiers_required),
+        "pass1_metrics_block": _format_pass1_metrics(spec, tier),
         "healthy_baselines_block": healthy_baselines_block,
+        # Chunk-specific placeholders
+        "day_index": day_index + 1,                    # 1-indexed for humans
+        "day_date": day_date_str,
+        "day_of_week": day_of_week_name,
+        "day_period_type": period_type,
     }
 
 
@@ -296,10 +435,10 @@ def _format_pass1_metrics(spec: ScenarioSpec, tier: str) -> str:
 
 
 # ============================================================
-# Intermediate file IO
+# Intermediate file IO (final per-scenario Pass1Output)
 # ============================================================
 def write_pass1_intermediate(output: Pass1Output, intermediates_dir: Path) -> Path:
-    """Persist Pass1Output atomically to intermediates/NN/pass1.json."""
+    """Persist the aggregated Pass1Output atomically to intermediates/NN/pass1.json."""
     target = checkpoint_path(output.scenario_id, "pass1", intermediates_dir)
     write_pydantic_atomic(target, output)
     return target

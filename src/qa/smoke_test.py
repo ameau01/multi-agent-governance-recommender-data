@@ -31,8 +31,10 @@ from generator.checkpoint import (
 )
 from generator.constants import (
     INTERMEDIATES_DIR,
+    JUDGE_MAX_TOKENS,
     SCENARIOS_OUTPUT_DIR,
     SMOKE_TEST_JUDGE_MODEL,
+    SMOKE_TEST_MAX_TOKENS,
     SMOKE_TEST_MODEL,
 )
 from generator.llm_client import LLMClient
@@ -99,8 +101,8 @@ class SmokeTestReport(BaseModel):
     details: list[SmokeTestJudgeResult]
 
 
-_SMOKE_TEST_MAX_TOKENS = 4096
-_JUDGE_MAX_TOKENS = 50
+# Max output tokens come from constants.py, which reads from .env
+# (DATAGENSMOKE_TEST_MAX_TOKENS / DATAGENJUDGE_MAX_TOKENS).
 
 
 # ============================================================
@@ -123,7 +125,7 @@ def generate_smoke_test_recommendation(
         )
 
     prompt = _build_smoke_test_prompt(scenario_dir)
-    client = LLMClient(model=SMOKE_TEST_MODEL, max_tokens=_SMOKE_TEST_MAX_TOKENS, temperature=0.2)
+    client = LLMClient(model=SMOKE_TEST_MODEL, max_tokens=SMOKE_TEST_MAX_TOKENS, temperature=0.2)
 
     log_path = intermediates_dir / scenario_id / "smoke_test_llm_log.json"
     response = _call_smoke_test_llm(client, prompt, log_path, scenario_id)
@@ -479,7 +481,7 @@ def _judge_specific_change(target: str, produced: str) -> bool:
     try:
         client = LLMClient(
             model=SMOKE_TEST_JUDGE_MODEL,
-            max_tokens=_JUDGE_MAX_TOKENS,
+            max_tokens=JUDGE_MAX_TOKENS,
             temperature=0.0,
         )
         # Direct prompt (no template) — judge call is too small to warrant caching
