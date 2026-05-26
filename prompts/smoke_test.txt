@@ -98,18 +98,103 @@ LENIENCY RULES (read carefully)
    four enum fields must match the top-level values exactly. The judge
    will compare top-level fields; the conclusion block is for downstream
    display only.
-5. FINDING-TYPE-AWARE GUIDANCE:
-     - `issue_found`           → recommendation; rich sections appropriate.
-     - `no_issue_found`        → `specific_change` describes what you
-                                  considered and ruled out; omit cost_impact,
-                                  projected_state, risk_assessment.
-     - `insufficient_data`     → `specific_change` lists what additional
-                                  evidence would be needed; omit rich sections.
-     - `diagnostic_deferral`   → `specific_change` describes why no
-                                  recommendation is safe yet and what to
-                                  observe further; omit rich sections.
-6. NO MARKDOWN FENCING in the output. The downstream parser strips ```json```
+5. NO MARKDOWN FENCING in the output. The downstream parser strips ```json```
    if present, but it costs you output tokens for no benefit.
+
+----------------------------------------------------------------
+CONTENT ROUTING — where each kind of content belongs
+----------------------------------------------------------------
+The downstream consumer treats each field as independent. The same content
+must always go to the same field across scenarios — this is what makes
+outputs comparable and machine-parseable. Specifically:
+
+  specific_change       → ACTIONS only. Use imperative verbs: "Switch...",
+                          "Downsize...", "Add...", "Replace...". Describe
+                          WHAT to change, not WHY or BY HOW MUCH. Justification
+                          belongs in `reasoning`. Numerical projections belong
+                          in `projected_state` and `cost_impact`. Bullets
+                          belong in `evidence`. Length target: 1-3 sentences.
+
+  conclusion.headline   → One-line BLUF (≤ 100 chars). The change + the
+                          headline benefit ("save 62%" or "fix SLA breach").
+
+  evidence.*            → Factual citations. Each bullet is ONE short
+                          sentence with at most ONE numeric value drawn
+                          directly from the inputs.
+
+  reasoning             → Causal chain only ("because X observed in evidence
+                          → therefore Y is the right action"). Refer BACK
+                          to evidence bullets rather than restating their
+                          numbers. 2-4 sentences.
+
+  projected_state       → Post-change ESTIMATES (string values, ranges OK).
+                          Use `notes` for the assumption behind the estimate.
+
+  cost_impact           → Monetary numbers only (USD). Use `notes` for the
+                          arithmetic ("$X/hr × N instances × 730 hrs = $Y/mo")
+                          or for comparison with alternatives.
+
+  risk_assessment       → Forward-looking operational concerns only — what
+                          could go wrong AFTER the change. Do NOT restate
+                          the recommendation here.
+
+----------------------------------------------------------------
+LENGTH GUIDANCE (soft anchors, not hard limits)
+----------------------------------------------------------------
+Aim for these character ranges. Going slightly over is fine when the content
+warrants it; consistently exceeding by 2× usually means content is in the
+wrong field per CONTENT ROUTING above.
+
+  conclusion.headline                    ≤ 100 chars (one line)
+  specific_change                        100-300 chars (1-3 sentences)
+  evidence.*  (each bullet)              ≤ 120 chars (one sentence)
+  reasoning                              300-700 chars (2-4 sentences)
+  projected_state.notes                  ≤ 300 chars
+  cost_impact.notes                      ≤ 400 chars
+  risk_assessment.primary_risk           ≤ 250 chars
+  risk_assessment.mitigation             ≤ 400 chars
+  risk_assessment.rollback               ≤ 300 chars
+  risk_assessment.notes                  ≤ 300 chars
+
+----------------------------------------------------------------
+REQUIRED FIELDS BY FINDING TYPE
+----------------------------------------------------------------
+These rules tighten "OMIT, DON'T NULLIFY" with finding-type-specific
+contracts. The four enum fields (`finding_type`, `primary_tier`,
+`secondary_tier`, `action_category`) plus `specific_change` are subject to
+the rules above (REQUIRED FIELDS); these add per-finding-type expectations
+for the rich sections.
+
+  finding_type=issue_found
+    REQUIRED  : primary_tier, action_category, conclusion (with headline),
+                evidence.telemetry_observations (≥3 bullets),
+                evidence.infrastructure_context (≥2 bullets),
+                reasoning, projected_state, cost_impact, risk_assessment
+    REQUIRED IF the inputs show a cross-tier correlation:
+                evidence.correlation_observations (≥1 bullet citing the
+                Pearson coefficient and lag)
+    NOTE      : cost_impact.current_monthly_usd MUST equal
+                metadata.cost_baseline.monthly_cost_total_usd when that
+                value is present in the inputs.
+
+  finding_type=no_issue_found
+    REQUIRED  : specific_change (describes what was considered AND
+                explicitly ruled out, with evidence),
+                evidence.telemetry_observations (≥3 bullets supporting
+                the "no issue" conclusion), reasoning
+    OMIT      : projected_state, cost_impact, risk_assessment, action_category
+                (these don't apply when no change is recommended)
+
+  finding_type=insufficient_data
+    REQUIRED  : specific_change (lists the SPECIFIC additional evidence
+                that would resolve the question — what metrics, what
+                window, what dimensions)
+    OMIT      : projected_state, cost_impact, risk_assessment
+
+  finding_type=diagnostic_deferral
+    REQUIRED  : specific_change (explains WHY deferral is the safe call
+                right now and WHAT to observe before recommending a change)
+    OMIT      : projected_state, cost_impact, risk_assessment, action_category
 
 USER:
 You are reviewing the application below.
