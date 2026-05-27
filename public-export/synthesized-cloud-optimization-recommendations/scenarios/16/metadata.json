@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "16",
+  "scenario_name": "Partial Optimization",
+  "scenario_type": "single_tier_mild_negative",
+  "narrative": {
+    "what_this_demonstrates": "A reporting dashboard whose compute tier shows mild under-utilization (slightly below the healthy band) while database and network sit in healthy ranges. The right action is a targeted single-step compute adjustment — not aggressive multi-tier rightsizing.\n",
+    "why_this_scenario_exists": "Tests restraint at the edge of \"should I act?\". The signal is weak — a more aggressive agent would over-recommend; a more conservative one would do nothing. The correct answer is the minimal targeted change.\n",
+    "what_the_agent_should_conclude": "Reduce compute fleet from 4 to 3 m5.large instances. Do not change instance class. Leave database and network alone. Expected savings ~$320/month.\n",
+    "what_distinguishes_good_from_great": "A good recommendation reduces compute count. A great recommendation keeps the instance class the same (avoiding over-correction), explicitly notes that other tiers are correctly sized, and quotes the conservative savings figure.\n"
+  },
+  "business_context": {
+    "description": "Medium-criticality reporting dashboard",
+    "sla_target_description": "99.7% availability, P95 < 500ms",
+    "sla_target_p95_ms": 500,
+    "sla_target_availability_pct": 99.7,
+    "criticality": "tier-2"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 2400.0,
+    "by_tier": {
+      "compute": 1280.0,
+      "database": 720.0,
+      "cache": 0.0,
+      "network": 400.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.large",
+      "instance_count": 4,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.large",
+      "replicas": 1,
+      "storage_gb": 200
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "least_outstanding_requests"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.large × 4 fixed (mildly oversized)",
+    "config_after": "m5.large × 3 fixed",
+    "observed_outcome_summary": "cpu_p50 lifted into the 30–40% band on the remaining instances, application_p95_latency_ms stayed within the 120–180ms band, SLA 99.7% preserved, monthly cost dropped approximately $320.\n",
+    "source_attribution": "Pattern observed across reporting-dashboard cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": true,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": false,
+    "primary_specialist_under_test": "compute_analyst"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

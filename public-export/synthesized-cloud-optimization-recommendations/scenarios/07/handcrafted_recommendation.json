@@ -1,0 +1,56 @@
+{
+  "scenario_id": "07",
+  "finding_type": "issue_found",
+  "specific_change": "Scale the Redis cache cluster from 3 to 6 cache.r6g.large nodes to relieve memory pressure (currently 88\u201395% used) and reduce evictions. Implement cache warming logic targeting the three hottest key patterns\u2014rec:user:* (27% miss rate), rec:trending:* (30% miss rate), and rec:similar:* (38% miss rate)\u2014and redesign these keys with shorter, sharded prefixes (e.g., rec:u:{shard}:{user_id}) to distribute load evenly across the expanded cluster. This doubles cache-tier cost from $700 to ~$1,400/month but is expected to restore the hit ratio above 0.89, drop db_query_p95 by ~38%, and bring application P95 latency back under the 300ms SLA threshold.",
+  "primary_tier": "cache",
+  "secondary_tier": "database",
+  "action_category": "pool_sizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "cache",
+    "secondary_tier": "database",
+    "action_category": "pool_sizing",
+    "headline": "Double cache nodes (3\u21926) and warm top-3 keys to fix SLA-breaching latency"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Cache hit ratio mean is 0.669 (p50 0.70), well below the healthy \u22650.89 band.",
+      "Cache memory utilization p95 reaches 94.6%, driving evictions up to 180/sec.",
+      "Application P95 latency p95 is 458ms, breaching the 300ms SLA target.",
+      "DB query P95 latency p95 is 316ms, elevated due to cache-miss overflow.",
+      "Compute CPU p95 peaks at ~70%, and memory p95 at ~72%\u2014both within healthy range.",
+      "DB connections p95 reaches 85, elevated but not saturated."
+    ],
+    "infrastructure_context": [
+      "Cache cluster is 3\u00d7 cache.r6g.large nodes with default TTL of 3600s and no warming.",
+      "Compute ASG is 6\u00d7 m5.large (min 6, max 10) with target-tracking\u2014correctly sized.",
+      "Database is db.r6g.large primary + 1 replica with 500GB storage\u2014adequate capacity."
+    ],
+    "correlation_observations": [
+      "cache_hit_ratio \u2194 db_query_p95_latency_ms: Pearson r = \u22120.961, lag 0 min\u2014near-perfect inverse.",
+      "cache_hit_ratio \u2194 application_p95_latency_ms: Pearson r = \u22120.963, lag 0 min\u2014cache misses directly drive app latency.",
+      "cache_hit_ratio \u2194 db_cache_hit_ratio: Pearson r = 0.924, lag 0 min\u2014cache misses cascade into DB buffer pool pressure."
+    ]
+  },
+  "reasoning": "The three cross-tier correlations (all |r| > 0.92, zero lag) establish that the cache tier is the root cause: when cache_hit_ratio drops, database query latency and application latency spike in lockstep. The cache is memory-saturated at 95% with evictions reaching 180/sec, which explains the low hit ratio. The top three key patterns (rec:user:*, rec:trending:*, rec:similar:*) collectively account for 6.7M misses out of ~22.1M total accesses (~30% miss rate), confirming that targeted warming and key redesign on these patterns will yield the largest hit-ratio recovery. Scaling compute or database would only mask symptoms\u2014the correlations prove the fix must be in the cache layer.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "58-65",
+    "memory_p95_pct_estimate": "62-70",
+    "latency_p95_ms_estimate": "200-260",
+    "sla_availability_preserved": true,
+    "notes": "Based on before/after evidence: cache_hit_ratio expected to rise from 0.65\u21920.91, db_query_p95 to drop ~38%, app P95 to return to 200\u2013260ms band. Compute and DB tiers remain unchanged and within healthy headroom."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 5800.0,
+    "projected_monthly_usd": 6500.0,
+    "savings_monthly_usd": -700.0,
+    "savings_pct": -12.07,
+    "notes": "Cache tier doubles from $700 to ~$1,400/month (3\u21926 cache.r6g.large nodes). Total rises from $5,800 to ~$6,500. This is a cost increase, not a saving, but it resolves an active SLA breach (P95 at 458ms vs 300ms target). Without the fix, SLA penalties and downstream scaling of DB/compute would cost significantly more. Compute ($3,200) and database ($1,900) tiers remain unchanged."
+  },
+  "risk_assessment": {
+    "primary_risk": "Doubling cache nodes without proper key distribution could create hot-shard imbalance if the rec:user:* pattern has skewed cardinality, leaving some new nodes underutilized while others remain saturated.",
+    "mitigation": "Deploy the key redesign (sharded prefixes) before or simultaneously with the node expansion. Monitor per-node memory utilization and eviction rates for 48 hours post-change; alert if any single node exceeds 80% memory or if hit ratio does not reach 0.85 within 24 hours.",
+    "rollback": "Revert the ElastiCache cluster to 3 nodes via Terraform (num_cache_nodes = 3). Cache warming logic can be disabled via feature flag. Key redesign rollback requires a coordinated deploy with application code revert and a brief cache flush.",
+    "notes": "Consider a phased rollout: first add nodes (3\u21926), then deploy warming, then roll out key redesign. This isolates the impact of each change and simplifies diagnosis if metrics don't improve as expected."
+  }
+}

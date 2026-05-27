@@ -1,0 +1,54 @@
+{
+  "scenario_id": "13",
+  "finding_type": "issue_found",
+  "specific_change": "Replace step scaling with predictive auto-scaling on the compute ASG (trigger scale-out at cpu_p95 > 65%, raise max_size from 12 to 14), add 2 read replicas (db.r6g.xlarge) with read/write splitting to the database tier, and increase the connection pool from 150 to 300. Schedule predictive scaling to pre-warm capacity 15 minutes before weekday spike windows (approximately 09:00\u201312:00 UTC and 14:00\u201317:00 UTC based on the observed correlation lag).",
+  "primary_tier": "compute",
+  "secondary_tier": "database",
+  "action_category": "scaling_policy_change",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": "database",
+    "action_category": "scaling_policy_change",
+    "headline": "Predictive compute scaling + 2 DB read replicas + pool 300 to fix SLA breach"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "cpu_p95 reaches 93.9% max with p95 of 88.3%, far above a safe 65% threshold.",
+      "application_p95_latency_ms hits 577.4ms max (p95=476.2ms), breaching the 350ms SLA target.",
+      "db_connections_p95 peaks at 210 max, exceeding the 150 connection pool ceiling.",
+      "db_query_p95_latency_ms spikes to 401.3ms max (p95=258.3ms), indicating database strain under load.",
+      "db_io_wait_p95 peaks at 17.9ms, roughly 4\u00d7 the median of 4.0ms, during spike periods."
+    ],
+    "infrastructure_context": [
+      "Compute ASG uses step scaling with min=8, max=12 m5.large instances \u2014 reactive, not predictive.",
+      "Database has a single primary (db.r6g.xlarge) with no read replicas and a 150-connection pool.",
+      "No cache tier is deployed, so all read traffic hits the database directly."
+    ],
+    "correlation_observations": [
+      "cpu_p95 \u2192 db_connections_p95 Pearson r=0.57 at 15-min lag (alignment 0.753), confirming compute spikes drive connection pool exhaustion.",
+      "cpu_p95 \u2192 db_query_p95_latency_ms Pearson r=0.596 at 15-min lag (alignment 0.83), showing compute load cascades into database query degradation."
+    ]
+  },
+  "reasoning": "The telemetry shows a clear cross-tier cascade: weekday compute spikes (cpu_p95 up to 93.9%) saturate the existing step-scaling policy, which reacts too slowly \u2014 the 15-minute lag in the correlation data confirms requests pile up before new instances come online. This drives db_connections_p95 to 210, well past the 150-connection pool limit, causing connection queuing that pushes db_query_p95_latency_ms to 401ms and application_p95_latency_ms to 577ms, breaching the 350ms SLA. Addressing compute alone would still leave the pool exhausted; addressing the pool alone would still leave compute saturated. A coordinated change \u2014 predictive scaling to absorb spikes before they cascade, plus read replicas and a doubled pool to handle the connection surge \u2014 resolves both tiers simultaneously.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "55-70%",
+    "memory_p95_pct_estimate": "55-65%",
+    "latency_p95_ms_estimate": "240-320",
+    "sla_availability_preserved": true,
+    "notes": "Based on before/after evidence from the search-service cohort: predictive scaling absorbs peak compute demand before saturation, while read replicas offload ~50% of queries. Peak db_connections_p95 expected to stay below 200, well within the new 300 pool ceiling."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 7800.0,
+    "projected_monthly_usd": 10800.0,
+    "savings_monthly_usd": -3000.0,
+    "savings_pct": -38.5,
+    "notes": "Cost increase breakdown: 2 additional read replicas at db.r6g.xlarge \u2248 $1,500/mo each = +$3,000/mo database. Compute cost stays near $4,800/mo baseline (predictive scaling uses existing instance type, peak instances rise from 12\u219214 but only during spike windows \u2248 +$200-400/mo). Total projected ~$10,800/mo. This is a reliability investment \u2014 the current config breaches the 350ms P95 SLA, which for a tier-1 search service carries far greater business risk than the $3,000/mo increase."
+  },
+  "risk_assessment": {
+    "primary_risk": "Predictive scaling may over-provision during anomalous low-traffic periods (holidays, outages), incurring unnecessary compute cost for idle instances.",
+    "mitigation": "Set a scheduled scaling floor only for confirmed weekday spike windows (09:00\u201312:00 and 14:00\u201317:00 UTC). Monitor ASG instance count vs. actual cpu_p95 weekly; tune the predictive model after 2 weeks. Alert on db_connections_p95 > 250 to catch pool pressure before it reaches the new 300 ceiling.",
+    "rollback": "Revert ASG to step scaling with max=12 via Terraform. Remove read replicas and reduce pool to 150. Both changes are stateless and can be applied within a single maintenance window.",
+    "notes": "Adding read replicas introduces replication lag risk for read-after-write patterns. Ensure the application's read/write splitting routes only eventually-consistent queries (search results, listings) to replicas."
+  }
+}

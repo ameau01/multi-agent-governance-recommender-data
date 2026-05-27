@@ -1,0 +1,22 @@
+[
+  {
+    "tier_a": "compute",
+    "tier_b": "database",
+    "metric_a": "cpu_p95",
+    "metric_b": "db_connections_p95",
+    "coefficient": 0.57,
+    "lag_minutes": 15,
+    "alignment_score": 0.753,
+    "description": "must hold on all 10 weekday dates during the two daily spike windows"
+  },
+  {
+    "tier_a": "compute",
+    "tier_b": "database",
+    "metric_a": "cpu_p95",
+    "metric_b": "db_query_p95_latency_ms",
+    "coefficient": 0.596,
+    "lag_minutes": 15,
+    "alignment_score": 0.83,
+    "description": "must hold on all 10 weekday dates during the two daily spike windows"
+  }
+]

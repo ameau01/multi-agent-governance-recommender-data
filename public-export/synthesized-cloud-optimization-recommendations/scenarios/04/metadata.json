@@ -1,0 +1,89 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "04",
+  "scenario_name": "Database Connection Bottleneck",
+  "scenario_type": "single_tier_negative",
+  "narrative": {
+    "what_this_demonstrates": "A database under pressure from both a slow-query problem and a connection pool that's exhausted during business hours. Symptoms: connection counts push above pool limits during business hours, db_query_p95_latency_ms spikes during the same windows.\n",
+    "why_this_scenario_exists": "Tests the Data Layer Analyst's ability to combine two signals (connections + latency) into a single composite issue and recommend both a pool increase and query optimization grounded in the scenario_specific_evidence.top_queries fixture.\n",
+    "what_the_agent_should_conclude": "Optimize the top 5 slowest queries, increase connection pool from 100 to 200, and add 2 read replicas with R/W splitting.\n",
+    "what_distinguishes_good_from_great": "A good recommendation identifies the connection bottleneck. A great recommendation references the specific slow queries by name from the top_queries fixture and pairs pool sizing with query optimization (not pool sizing alone, which would only mask the slow-query problem).\n"
+  },
+  "business_context": {
+    "description": "High-criticality user service",
+    "sla_target_description": "99.9% availability, P95 < 400ms",
+    "sla_target_p95_ms": 400,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 2100.0,
+    "by_tier": {
+      "compute": 0.0,
+      "database": 2100.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": null,
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.large",
+      "replicas": 1,
+      "storage_gb": 500
+    },
+    "cache": null,
+    "network": null
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [
+      {
+        "query_text": "SELECT u.* FROM users u WHERE u.email = ?",
+        "count": 4704000,
+        "p95_latency_ms": 820.0
+      },
+      {
+        "query_text": "SELECT * FROM sessions WHERE token = ? AND expires_at > NOW()",
+        "count": 7392000,
+        "p95_latency_ms": 640.0
+      },
+      {
+        "query_text": "SELECT u.*, p.* FROM users u JOIN profiles p ON p.user_id = u.id WHERE u.id = ?",
+        "count": 1075200,
+        "p95_latency_ms": 510.0
+      },
+      {
+        "query_text": "SELECT a.* FROM audit_log a JOIN users u ON a.user_id = u.id WHERE a.created_at > ?",
+        "count": 268800,
+        "p95_latency_ms": 480.0
+      },
+      {
+        "query_text": "WITH RECURSIVE perms AS (...) SELECT * FROM perms WHERE user_id = ?",
+        "count": 638400,
+        "p95_latency_ms": 410.0
+      }
+    ],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "db.r6g.large single instance, connection pool=100, 0 replicas",
+    "config_after": "db.r6g.large, optimized top 5 queries, pool=200, 2 read replicas",
+    "observed_outcome_summary": "db_query_p95_latency_ms dropped from 350–650ms business-hours band to under 220ms, db_connections_p95 stayed under 130 (well below new pool ceiling), SLA 99.9% preserved.\n",
+    "source_attribution": "Pattern observed across user-service cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": false,
+    "primary_specialist_under_test": "data_layer_analyst"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

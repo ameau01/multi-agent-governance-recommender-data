@@ -1,0 +1,52 @@
+{
+  "scenario_id": "16",
+  "finding_type": "issue_found",
+  "specific_change": "Reduce the compute fleet from 4 \u00d7 m5.large to 3 \u00d7 m5.large by setting count = 3 in the aws_instance.compute resource. Keep the instance class unchanged (m5.large). Do not modify the database (db.r6g.large) or network (ALB with least_outstanding_requests) tiers, which are correctly sized.",
+  "primary_tier": "compute",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Remove 1 of 4 m5.large instances to save ~$320/mo; other tiers healthy"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Compute CPU p95 median is 39.1% with max 48.8%, well below saturation.",
+      "Compute CPU p50 median is only 23.1%, indicating mild under-utilization across 4 instances.",
+      "Memory p95 median is 39.4% (max 49.5%), leaving ample headroom.",
+      "Application p95 latency median is 133.8ms (max 171.3ms), far below the 500ms SLA target.",
+      "Database query p95 latency median is 55ms with cache hit ratio \u22650.92, healthy range.",
+      "Network error rate p95 is 0.009 (0.9%), well within acceptable bounds."
+    ],
+    "infrastructure_context": [
+      "Compute is 4 \u00d7 m5.large with no auto-scaling policy (fixed fleet).",
+      "Database is db.r6g.large with 1 replica and 200GB storage \u2014 appropriately sized for current load.",
+      "ALB uses least_outstanding_requests algorithm, suitable for the workload profile."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "Compute CPU utilization sits consistently below the healthy 30-50% band at p50 (23.1%) across all four instances, while p95 only reaches ~48%, indicating the fleet is mildly oversized. Removing one instance would redistribute load across three instances, lifting CPU p50 into the 30-40% range while keeping p95 comfortably below saturation. The application p95 latency at 133.8ms has over 300ms of headroom to the 500ms SLA, so a modest increase from the rebalance poses no SLA risk. Database and network tiers show healthy utilization and require no changes.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "55-65",
+    "memory_p95_pct_estimate": "50-65",
+    "latency_p95_ms_estimate": "150-200",
+    "sla_availability_preserved": true,
+    "notes": "Estimates assume roughly linear redistribution of load across 3 instances (4/3 \u2248 1.33\u00d7 per-instance load). Latency stays well within the 500ms SLA target."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 2400.0,
+    "projected_monthly_usd": 2080.0,
+    "savings_monthly_usd": 320.0,
+    "savings_pct": 13.33,
+    "notes": "Compute tier drops from $1,280/mo (4 \u00d7 m5.large) to $960/mo (3 \u00d7 m5.large). Per-instance cost: $1,280 / 4 = $320/mo. Database ($720) and network ($400) costs unchanged."
+  },
+  "risk_assessment": {
+    "primary_risk": "With only 3 instances, losing one instance leaves 2 serving all traffic, pushing CPU p95 potentially above 80% and increasing latency during the recovery window.",
+    "mitigation": "Set a CloudWatch alarm on CPU p95 > 70% with a 5-minute evaluation period. Pre-configure the launch template so a 4th instance can be launched within minutes. Consider adding a simple target-tracking auto-scaling policy (min=3, max=5) as a safety net.",
+    "rollback": "Revert the Terraform count from 3 to 4 and apply. The original AMI and launch template are unchanged, so a new instance launches identically within minutes.",
+    "notes": "This is a tier-2 reporting dashboard (99.7% SLA), so brief capacity dips during instance replacement are tolerable."
+  }
+}

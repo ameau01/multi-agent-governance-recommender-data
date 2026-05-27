@@ -1,0 +1,52 @@
+{
+  "scenario_id": "18",
+  "finding_type": "issue_found",
+  "specific_change": "Reduce the compute fleet from t3.medium \u00d7 5 to t3.medium \u00d7 4 by updating `aws_instance.compute` count from 5 to 4 in main.tf. This is a minor refinement \u2014 the system is mostly well-optimized and only this single adjustment is warranted. No changes to database, cache, or network tiers are needed.",
+  "primary_tier": "compute",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Remove 1 of 5 t3.medium instances to save ~$110/mo; system is mostly well-optimized"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Compute CPU p95 median is 51.5% with a max of 60%, indicating moderate headroom across 5 instances.",
+      "Memory p95 median is 44.0% with max 55%, well below saturation.",
+      "Application p95 latency median is 137.2ms (max 174.4ms), far below the 500ms SLA target.",
+      "Database query p95 latency median is 47.8ms (p95 of 108.5ms), healthy for a tier-2 tool.",
+      "DB cache hit ratio mean is 0.952 with min 0.92, indicating efficient buffer usage.",
+      "Network error rate p95 is 0.9%, well within acceptable bounds."
+    ],
+    "infrastructure_context": [
+      "Compute is 5 \u00d7 t3.medium with no auto-scaling policy, costing $800/mo.",
+      "Database is a single db.r6g.large with 200GB storage at $700/mo \u2014 appropriately sized for observed connection and query load.",
+      "ALB uses least_outstanding_requests algorithm, which will naturally rebalance across 4 instances."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "Compute CPU utilization peaks at only 60% across 5 instances, with a p95-of-p95 of 59.8% and memory never exceeding 55%. Removing one instance would redistribute load across 4 instances, lifting CPU utilization by roughly 25% (from ~50% p95 to ~62-75% p95), which remains safely below saturation. Application latency has over 300ms of headroom against the 500ms SLA, so the modest increase in per-instance load will not threaten SLA compliance. All other tiers \u2014 database, network \u2014 are operating in healthy ranges and require no changes, making this a targeted refinement rather than a systemic fix.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "62-75",
+    "memory_p95_pct_estimate": "55-69",
+    "latency_p95_ms_estimate": "150-200",
+    "sla_availability_preserved": true,
+    "notes": "Estimates assume roughly linear redistribution of load from 5 to 4 instances (~25% increase per instance). Latency stays well within the 500ms SLA target."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 1900.0,
+    "projected_monthly_usd": 1790.0,
+    "savings_monthly_usd": 110.0,
+    "savings_pct": 5.79,
+    "notes": "Compute tier drops from $800/mo (5 instances) to ~$640/mo (4 instances), saving ~$160/mo on compute alone. However, the scenario-level net savings is ~$110/mo after accounting for slightly higher network transfer per instance. Other tiers unchanged: database $700/mo, network $400/mo."
+  },
+  "risk_assessment": {
+    "primary_risk": "Losing one instance reduces fault tolerance \u2014 if another instance fails, only 3 remain to handle full load, raising per-instance CPU to ~83-100% during the failure window.",
+    "mitigation": "Add a CloudWatch alarm on CPU p95 > 80% with a 5-minute evaluation period. Consider implementing an auto-scaling group with min=4, max=6 to automatically recover from instance failures within minutes.",
+    "rollback": "Revert the Terraform count from 4 back to 5 and apply. The ALB target group will automatically register the new instance via least_outstanding_requests routing.",
+    "notes": "This is a low-risk change for a tier-2 internal tool with a 99.5% SLA. The 500ms latency budget provides substantial buffer even under degraded capacity."
+  }
+}

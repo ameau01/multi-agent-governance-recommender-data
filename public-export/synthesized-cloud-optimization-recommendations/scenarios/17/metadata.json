@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "17",
+  "scenario_name": "Cross-Tier Performance Degradation",
+  "scenario_type": "diagnostic_deferral",
+  "narrative": {
+    "what_this_demonstrates": "A core API platform whose latency rises simultaneously across all three tiers during peak hours, with no clear lead-lag relationship. CPU and connection counts are within normal ranges on all tiers — the problem is latency-distributed, not capacity-driven. Root cause is ambiguous from the observable signals alone.\n",
+    "why_this_scenario_exists": "Tests the system's ability to recognize when *not* to recommend aggressive action. The data shows a problem, but the root cause could be a downstream provider, a shared queue, an external dependency, or coordination overhead — none observable from this telemetry. Recommending scaling without diagnosis risks worsening the problem.\n",
+    "what_the_agent_should_conclude": "Recommend full end-to-end distributed trace analysis to identify the actual root cause before making any scaling or rightsizing decisions. Aggressive action without diagnosis is contraindicated.\n",
+    "what_distinguishes_good_from_great": "A good recommendation defers to trace analysis. A great recommendation explicitly enumerates the candidate root causes (downstream provider, shared queue, external dependency, coordination overhead) and notes that the current telemetry is insufficient to choose between them.\n"
+  },
+  "business_context": {
+    "description": "High-criticality core API platform",
+    "sla_target_description": "99.9% availability, P95 < 400ms",
+    "sla_target_p95_ms": 400,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 9800.0,
+    "by_tier": {
+      "compute": 5600.0,
+      "database": 3000.0,
+      "cache": 0.0,
+      "network": 1200.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.large",
+      "instance_count": 10,
+      "scaling_policy": "step",
+      "auto_scaling_min": 10,
+      "auto_scaling_max": 14
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.xlarge",
+      "replicas": 1,
+      "storage_gb": 500
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "round_robin"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "10 m5.large + db.r6g.xlarge + basic VPC peering (no optimization across tiers)",
+    "config_after": "End-to-end distributed trace analysis identified actual root cause (varies by environment); targeted intervention applied",
+    "observed_outcome_summary": "Distributed tracing surfaced the actual root cause in each case (downstream provider, shared queue, or external dependency). Targeted intervention reduced latency significantly while SLA 99.9% stayed preserved throughout the diagnostic window.\n",
+    "source_attribution": "Pattern observed across core-API-platform cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": true,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

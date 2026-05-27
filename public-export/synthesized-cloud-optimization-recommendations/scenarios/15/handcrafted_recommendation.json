@@ -1,0 +1,38 @@
+{
+  "scenario_id": "15",
+  "finding_type": "diagnostic_deferral",
+  "specific_change": "Before making any rightsizing changes, confirm with the business whether the 99.99% availability SLA target is contractually required or aspirational. The current infrastructure is heavily over-provisioned (CPU p95 at 34%, memory p95 at 42%, DB connections p95 at 60) to achieve near-zero error rates and comfortable latency headroom. If the business confirms 99.95% is acceptable, right-size compute from m5.xlarge \u00d7 16 to m5.large \u00d7 10, reduce database replicas from 3 to 2, and downsize the primary to db.r6g.xlarge \u2014 yielding ~$8,200/month savings. If 99.99% is contractually mandated, the current posture is defensible and should be preserved. Monitor the following before recommending a change: (1) contractual SLA obligations and penalty clauses, (2) peak traffic patterns beyond this 14-day window (e.g., month-end payment surges), and (3) disaster recovery requirements that may justify the third replica.",
+  "primary_tier": "compute",
+  "secondary_tier": "database",
+  "action_category": null,
+  "conclusion": {
+    "finding_type": "diagnostic_deferral",
+    "primary_tier": "compute",
+    "secondary_tier": "database",
+    "action_category": null,
+    "headline": "Resolve SLA target (99.99% vs 99.95%) before rightsizing \u2014 $8.2K/mo at stake"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Compute CPU p95 is only 34% across 16 m5.xlarge instances \u2014 significant headroom.",
+      "Memory p95 peaks at 42%, well below saturation thresholds.",
+      "Application p95 latency is 142.3ms, comfortably under the 200ms SLA target.",
+      "Database query p95 latency is 67.5ms with cache hit ratio consistently at 98%.",
+      "DB connections p95 is 60 out of a much larger pool capacity on db.r6g.2xlarge.",
+      "Network error rate is 0.0% across the entire 14-day window \u2014 zero observed errors.",
+      "DB I/O wait p95 is only 3.8ms, indicating no storage bottleneck."
+    ],
+    "infrastructure_context": [
+      "16 \u00d7 m5.xlarge compute instances with no auto-scaling policy configured.",
+      "db.r6g.2xlarge primary + 3 read replicas (Terraform shows 2 replicas, metadata says 3) across AZs.",
+      "ALB using least_outstanding_requests algorithm \u2014 appropriate for even distribution.",
+      "Multi-AZ deployment with PrivateLink, consistent with high-availability posture.",
+      "Total monthly cost is $18,200 ($9,600 compute, $6,400 database, $2,200 network)."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "All telemetry metrics show substantial headroom: CPU never exceeds 35%, memory stays below 42%, latency is well within SLA, and the error rate is literally zero. This pattern is consistent with deliberate over-provisioning for a 99.99% availability target on a tier-1 payment platform. However, the technical waste (~45% savings potential) is only actionable if the business confirms that 99.95% availability is acceptable. For a payment-processing system, the difference between 99.99% and 99.95% translates to ~4.3 minutes vs ~21.6 minutes of allowable downtime per month \u2014 a distinction that may carry contractual penalties. The correct first action is therefore a business-context question, not a technical change.",
+  "projected_state": null,
+  "cost_impact": null,
+  "risk_assessment": null
+}

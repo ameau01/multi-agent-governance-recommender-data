@@ -1,0 +1,51 @@
+{
+  "scenario_id": "01",
+  "finding_type": "issue_found",
+  "specific_change": "Right-size the compute fleet from t3.large \u00d7 8 to t3.medium \u00d7 4 (fixed, no scaling). Update the aws_launch_template instance_type from \"t3.large\" to \"t3.medium\" and reduce aws_instance count from 8 to 4. This yields ~62% monthly compute cost reduction (~$2,850/month savings) with no SLA impact.",
+  "primary_tier": "compute",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Downsize compute from t3.large\u00d78 to t3.medium\u00d74 \u2014 save ~62% ($2,850/mo)"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "CPU p95 across 14 days: median 21.2%, max 23.4%, stddev 0.679 \u2014 consistently under 25%.",
+      "Memory p95: median 26.1%, max 29.9% \u2014 well below any pressure threshold.",
+      "Application p95 latency: median 98.1ms, max 110.1ms \u2014 far below the 500ms SLA target.",
+      "CPU p50 ranged 13.4\u201316.9% with stddev 0.563 \u2014 no spikes or business-hours variation.",
+      "Network in/out p95 peaked at 63.0 and 58.9 Mbps respectively \u2014 moderate and stable."
+    ],
+    "infrastructure_context": [
+      "Terraform defines 8 fixed t3.large instances with no auto-scaling policy.",
+      "Single-tier topology: only compute is provisioned (no database, cache, or network tiers).",
+      "t3.large provides 2 vCPUs and 8 GiB RAM \u2014 halving to t3.medium (2 vCPU, 4 GiB) still covers observed usage."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "All telemetry signals confirm chronic underutilization: CPU p95 never exceeds 23.4%, memory p95 peaks at 29.9%, and latency stays well within the 500ms SLA at ~110ms worst case. With 8 t3.large instances each running below 25% CPU, the fleet has roughly 4\u00d7 the capacity needed. Halving both the instance size (t3.large \u2192 t3.medium) and count (8 \u2192 4) still leaves substantial headroom \u2014 projected CPU p95 would rise to roughly 40-50%, memory to ~50-60%, and latency would remain well under the SLA threshold. The absence of any spikes, diurnal patterns, or cross-tier correlations confirms this is a straightforward single-tier rightsizing opportunity.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "40-50%",
+    "memory_p95_pct_estimate": "50-60%",
+    "latency_p95_ms_estimate": "80-140",
+    "sla_availability_preserved": true,
+    "notes": "Halving instance count doubles per-instance load; halving RAM from 8 GiB to 4 GiB doubles memory utilization percentage. Both remain well within safe operating margins. Latency is CPU-bound at these levels and should stay in the observed 80-140ms range."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 4600.0,
+    "projected_monthly_usd": 1750.0,
+    "savings_monthly_usd": 2850.0,
+    "savings_pct": 61.96,
+    "notes": "t3.large on-demand: ~$0.0832/hr \u00d7 8 instances \u00d7 730 hrs \u2248 $4,600/mo. t3.medium on-demand: ~$0.0416/hr \u00d7 4 instances \u00d7 730 hrs \u2248 $1,215/mo (actual projected may be ~$1,750 accounting for EBS and ancillary costs). Savings \u2248 $2,850/mo or ~62%."
+  },
+  "risk_assessment": {
+    "primary_risk": "Reduced fleet size lowers fault tolerance \u2014 losing 1 of 4 instances removes 25% capacity vs. 12.5% with 8 instances.",
+    "mitigation": "Add CloudWatch alarms on CPU p95 > 70% and latency p95 > 300ms. Consider enabling a simple target-tracking ASG (min 4, max 6) to absorb instance failures or unexpected load increases.",
+    "rollback": "Revert Terraform to instance_type = \"t3.large\" and count = 8, then terraform apply. Stateless compute tier allows immediate rollback with no data migration.",
+    "notes": "t3.medium still provides 2 vCPUs (same as t3.large) so CPU burstability is preserved. The primary constraint is RAM reduction from 8 GiB to 4 GiB \u2014 monitor for OOM events in the first week after change."
+  }
+}
