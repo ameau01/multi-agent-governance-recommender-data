@@ -157,6 +157,61 @@ wrong field per CONTENT ROUTING above.
   risk_assessment.notes                  ≤ 300 chars
 
 ----------------------------------------------------------------
+OPERATIONAL SPECIFICITY REQUIREMENTS (must follow for issue_found)
+----------------------------------------------------------------
+A recommendation is "operationally specific" when an SRE / FinOps engineer
+could implement it as-written WITHOUT having to do additional analysis to
+fill in missing details. Vague-but-directional output is NOT acceptable for
+`finding_type=issue_found` — it's a sign the agent didn't engage with the
+inputs deeply enough.
+
+Three concrete demands that apply to your `specific_change` AND to the
+relevant rich sections:
+
+1. CITE FIXTURE DATA BY NAME when present.
+   The scenario metadata may include `scenario_specific_evidence` with
+   `top_queries` (slow database queries), `top_cache_keys` (hot cache key
+   patterns), and `per_instance_breakdown` (hot/cold instance ids and
+   cpu bands). When these are present and non-empty, your `specific_change`
+   MUST reference them by name. Generic phrasing like "optimize slow queries"
+   or "rebalance hot instances" is insufficient — name the specific queries,
+   keys, or instance ids you're targeting.
+
+   Example:
+     SPEC FIXTURE: top_queries = ["SELECT * FROM orders WHERE user_id=?", ...]
+     GOOD: "Optimize the orders-by-user query (currently 340ms p95) by adding
+            a (user_id, created_at) composite index..."
+     BAD : "Optimize the top 5 slow queries..."
+
+2. SPECIFY EXACT UTC TIME WINDOWS for scheduling / time-bounded changes.
+   When the recommendation involves scheduling, off-peak scaling, maintenance
+   windows, or any time-bounded behavior, your `specific_change` MUST specify
+   exact UTC time bands. Generic phrasing like "during off-peak hours" is
+   insufficient — define the hours.
+
+   Example:
+     GOOD: "Reduce capacity by 65% during off-peak (weekdays 20:00-09:00 UTC,
+            weekends all day)"
+     BAD : "Scale down during off-peak hours"
+
+3. INCLUDE MAGNITUDE + EXPECTED COST IMPACT for quantitative changes.
+   When the recommendation involves scaling, rightsizing, or capacity
+   changes, your `specific_change` MUST include a magnitude (percentage,
+   instance count, or both) AND the `cost_impact` section MUST populate
+   `current_monthly_usd`, `projected_monthly_usd`, and `savings_monthly_usd`
+   using `metadata.cost_baseline.monthly_cost_total_usd` as the current
+   anchor when available.
+
+   Example:
+     GOOD: "Right-size compute from m5.2xlarge × 12 to m5.large × 8 (33%
+            cost reduction, ~$1,800/month savings)"
+     BAD : "Downsize compute and database"
+
+These demands raise the bar for `issue_found` only — they do NOT apply to
+`no_issue_found`, `insufficient_data`, or `diagnostic_deferral` (which by
+design don't propose quantitative changes).
+
+----------------------------------------------------------------
 REQUIRED FIELDS BY FINDING TYPE
 ----------------------------------------------------------------
 These rules tighten "OMIT, DON'T NULLIFY" with finding-type-specific

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "09",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "scaling_policy_change",
+    "produced": "scaling_policy_change",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Implement scheduled scaling to reduce capacity by 65% during off-peak hours (outside 9\u201311 AM and 2\u20134 PM weekdays) and weekends. Maintain full peak capacity during the specified peak windows.\n",
+    "produced": "Replace the fixed 20\u00d7 m5.xlarge compute fleet with scheduled Auto Scaling: maintain 20 instances during peak windows (weekdays 09:00\u201311:00 UTC and 14:00\u201316:00 UTC), scale down to 7 instances (65% redu",
+    "match": true
+  }
+}

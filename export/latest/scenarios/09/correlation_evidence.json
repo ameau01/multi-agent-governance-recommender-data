@@ -1,0 +1,22 @@
+[
+  {
+    "tier_a": "compute",
+    "tier_b": "database",
+    "metric_a": "cpu_p95",
+    "metric_b": "db_query_p95_latency_ms",
+    "coefficient": 0.751,
+    "lag_minutes": 0,
+    "alignment_score": 0.84,
+    "description": "must hold on all 10 weekday dates during peak windows"
+  },
+  {
+    "tier_a": "compute",
+    "tier_b": "network",
+    "metric_a": "cpu_p95",
+    "metric_b": "network_throughput_p95",
+    "coefficient": 0.886,
+    "lag_minutes": 0,
+    "alignment_score": 0.876,
+    "description": "must hold on all 10 weekday dates during peak windows"
+  }
+]

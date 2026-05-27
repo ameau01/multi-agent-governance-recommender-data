@@ -1,0 +1,24 @@
+{
+  "scenario_id": "15",
+  "outcome": "fail",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "diagnostic_deferral",
+    "match": false
+  },
+  "primary_tier": {
+    "target": null,
+    "produced": "compute",
+    "match": false
+  },
+  "action_category": {
+    "target": "sla_review",
+    "produced": null,
+    "match": false
+  },
+  "specific_change": {
+    "target": "Initiate SLA review: confirm whether 99.99% availability is actually required by the business, or whether 99.95% is acceptable. If 99.95% is acceptable, right-size all tiers (compute m5.xlarge \u00d7 16 \u2192 ",
+    "produced": "Before making any rightsizing changes, confirm with the business whether the 99.99% availability SLA target is contractually required or aspirational. The current infrastructure is heavily over-provis",
+    "match": false
+  }
+}

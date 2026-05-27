@@ -1,0 +1,24 @@
+{
+  "scenario_id": "04",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "database",
+    "produced": "database",
+    "match": true
+  },
+  "action_category": {
+    "target": "query_cache_optimization",
+    "produced": "query_cache_optimization",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Optimize the top 5 slowest queries (per top_queries fixture), increase database connection pool limit from 100 to 200, and add 2 read replicas with read/write splitting.\n",
+    "produced": "Optimize the top 5 slowest queries: (1) add index on users(email) for the email-lookup query (820ms p95), (2) add index on sessions(token, expires_at) for the session-token query (640ms p95), (3) add ",
+    "match": false
+  }
+}

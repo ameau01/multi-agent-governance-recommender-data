@@ -128,8 +128,17 @@ SDK_MAX_RETRIES = int(os.getenv("DATAGEN_SDK_MAX_RETRIES", "5"))
 
 # ---- Pass 2 window-based generation (new architecture) ----
 # Each LLM call handles ONE trigger window across all affected tiers.
-# Output is small (~10-30 records); fits comfortably in PASS2_WINDOW_MAX_TOKENS.
-PASS2_WINDOW_MAX_TOKENS = int(os.getenv("DATAGEN_PASS2_WINDOW_MAX_TOKENS", "8000"))
+#
+# Output sizing: one record ≈ 70-90 tokens (JSON-encoded with index wrapper).
+# A window covers up to 36 trigger slots (9-hour business-hours weekday).
+# Per-window output budget = N_effects × records_per_window × ~80 tokens.
+# Scenario 07 has 3 effects × 36 records ≈ 6,000 output tokens; with the
+# validation-feedback input accumulating across multi-turn retries, the
+# effective output budget shrinks further. The previous 8,000 cap choked
+# scenario 07 mid-emission. 16,000 leaves headroom for any realistic
+# multi-effect rule (the dataset's worst case is hypothetically 4 effects
+# × 36 records ≈ 8,500 output tokens).
+PASS2_WINDOW_MAX_TOKENS = int(os.getenv("DATAGEN_PASS2_WINDOW_MAX_TOKENS", "16000"))
 # Per-window agent loop: max turns of "you failed validation, here's what's wrong, redo"
 # feedback before the window is declared unrecoverable and the run aborts.
 PASS2_AGENT_MAX_TURNS = int(os.getenv("DATAGEN_PASS2_AGENT_MAX_TURNS", "4"))

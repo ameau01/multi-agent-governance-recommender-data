@@ -1,0 +1,24 @@
+{
+  "scenario_id": "14",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Right-size compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 8. Right-size database from db.r6g.4xlarge to db.r6g.xlarge. Leave the 2 read replicas and PrivateLink network configuration unchanged.\n",
+    "produced": "Right-size compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 8 (reducing from 96 vCPUs / 384 GiB to 16 vCPUs / 64 GiB total) and downsize the database primary and replicas from db.r6g.4xlarge to db.r6g.xlarg",
+    "match": false
+  }
+}

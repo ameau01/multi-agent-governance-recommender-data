@@ -1,0 +1,88 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "12",
+  "scenario_name": "Healthy Compute, Problematic Database",
+  "scenario_type": "mixed",
+  "generated_at": "2026-05-26T07:06:29.161748Z",
+  "narrative": {
+    "what_this_demonstrates": "A user profile service where compute is correctly sized and operating in healthy ranges, but the database is significantly over-provisioned and operating at very low utilization. The right action is downsize the database only \u2014 compute and read replicas should not change.\n",
+    "why_this_scenario_exists": "Tests mixed-state handling. The agent must recommend action on one tier and explicit no-action on another in the same scenario. Failure mode caught: agent recommends across-the-board rightsizing when only one tier needs it.\n",
+    "what_the_agent_should_conclude": "Downsize the database from db.r6g.2xlarge to db.r6g.large. Leave compute and read replicas unchanged. Expected savings: ~$1,400/month.\n",
+    "what_distinguishes_good_from_great": "A good recommendation identifies the DB as over-provisioned. A great recommendation explicitly notes that compute is correctly sized and must not be touched \u2014 the mixed nature of the scenario is what makes the discriminating judgment matter.\n"
+  },
+  "business_context": {
+    "description": "High-criticality user profile service",
+    "sla_target_description": "99.9% availability, P95 < 250ms",
+    "sla_target_p95_ms": 250,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 7200.0,
+    "by_tier": {
+      "compute": 2800.0,
+      "database": 4400.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.large",
+      "instance_count": 6,
+      "scaling_policy": "target_tracking",
+      "auto_scaling_min": 6,
+      "auto_scaling_max": 10
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.2xlarge",
+      "replicas": 1,
+      "storage_gb": 500
+    },
+    "cache": null,
+    "network": null
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.large \u00d7 6 (healthy) + db.r6g.2xlarge (oversized)",
+    "config_after": "m5.large \u00d7 6 unchanged + db.r6g.large",
+    "observed_outcome_summary": "Compute metrics stayed in healthy ranges (unchanged), database db_query_p95_latency_ms stayed under 100ms, SLA 99.9% preserved, monthly cost dropped by approximately $1,400.\n",
+    "source_attribution": "Pattern observed across user-profile-service cohort during Q4 2025."
+  },
+  "target_recommendation": {
+    "finding_type": "issue_found",
+    "primary_tier": "database",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "specific_change": "Downsize database from db.r6g.2xlarge to db.r6g.large. Leave compute tier and read replicas unchanged.\n",
+    "expected_cost_delta_usd": -1400.0,
+    "expected_performance_impact": "No regression on compute (unchanged); database stays under 100ms p95 latency",
+    "expected_reliability_impact": "SLA 99.9% preserved",
+    "confidence_expected": "high",
+    "eval_rubric_focus": [
+      "R1",
+      "R2",
+      "R3",
+      "R4"
+    ]
+  },
+  "evaluation_properties": {
+    "exercises_restraint": true,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

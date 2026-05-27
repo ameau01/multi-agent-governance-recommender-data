@@ -1,0 +1,12 @@
+[
+  {
+    "tier_a": "compute",
+    "tier_b": "database",
+    "metric_a": "cpu_p95",
+    "metric_b": "db_connections_p95",
+    "coefficient": 0.83,
+    "lag_minutes": 0,
+    "alignment_score": 0.838,
+    "description": "all three tiers simultaneously low across all 14 days (statistical co-presence, no cause-effect adjustment)"
+  }
+]

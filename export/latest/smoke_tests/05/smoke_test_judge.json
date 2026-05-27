@@ -1,0 +1,24 @@
+{
+  "scenario_id": "05",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "network",
+    "produced": "network",
+    "match": true
+  },
+  "action_category": {
+    "target": "load_balancer_reconfiguration",
+    "produced": "load_balancer_reconfiguration",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Reconfigure ALB target group from round_robin to least_outstanding_requests. Do not change instance class or count.\n",
+    "produced": "Reconfigure the ALB target group (app05-tg) load-balancing algorithm from round_robin to least_outstanding_requests. No capacity change is needed \u2014 the existing 8 \u00d7 c5.xlarge fleet is sufficient. In T",
+    "match": true
+  }
+}

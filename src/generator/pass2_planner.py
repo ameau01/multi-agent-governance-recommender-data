@@ -328,19 +328,32 @@ def _parse_pattern(
     total_days = DATA_WINDOW_DAYS  # 14
     min_qualifying = total_days     # safe default; refine via regex below
 
-    # "at least N of M days"
+    # Variant 1: "at least N of M days"
     m = re.search(r"at least\s+(\d+)\s+of\s+(\d+)\s+days?", text)
     if m:
         min_qualifying = int(m.group(1))
         total_days = int(m.group(2))
     else:
-        m = re.search(r"all\s+(\d+)\s+weekday\s+dates?", text)
+        # Variant 2: "at least N of M weekday dates" / "at least N of M weekdays"
+        # (Matches the corrected phrasing of scenario 07's spec, where the scope
+        # is weekdays-only so "days" is naturally less precise.)
+        m = re.search(
+            r"at least\s+(\d+)\s+of\s+(\d+)\s+(?:weekday\s+dates?|weekdays?|dates?)",
+            text,
+        )
         if m:
             min_qualifying = int(m.group(1))
+            total_days = int(m.group(2))
         else:
-            m = re.search(r"across all\s+(\d+)\s+days?", text)
+            # Variant 3: "all N weekday dates"
+            m = re.search(r"all\s+(\d+)\s+weekday\s+dates?", text)
             if m:
                 min_qualifying = int(m.group(1))
+            else:
+                # Variant 4: "across all N days"
+                m = re.search(r"across all\s+(\d+)\s+days?", text)
+                if m:
+                    min_qualifying = int(m.group(1))
 
     return PatternRequirement(
         raw_text=pattern_text,

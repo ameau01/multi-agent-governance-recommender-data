@@ -1,0 +1,24 @@
+{
+  "scenario_id": "01",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Switch compute instances from t3.large to t3.medium and reduce minimum replica count from 8 to 4.\n",
+    "produced": "Right-size the compute fleet from t3.large \u00d7 8 to t3.medium \u00d7 4 (fixed, no scaling). Update the aws_launch_template instance_type from \"t3.large\" to \"t3.medium\" and reduce aws_instance count from 8 to",
+    "match": true
+  }
+}

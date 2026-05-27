@@ -1,0 +1,24 @@
+{
+  "scenario_id": "10",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "network",
+    "produced": "network",
+    "match": true
+  },
+  "action_category": {
+    "target": "network_topology_change",
+    "produced": "network_topology_change",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Switch from basic VPC peering to AWS PrivateLink for the payment-provider integration. Add retries with exponential backoff at the service boundary.\n",
+    "produced": "Replace basic VPC peering for the payment-provider integration with AWS PrivateLink to eliminate cross-region latency spikes during business hours (weekdays 09:00\u201318:00 UTC). Add application-level ret",
+    "match": false
+  }
+}

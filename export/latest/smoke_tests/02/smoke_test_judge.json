@@ -1,0 +1,24 @@
+{
+  "scenario_id": "02",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "scaling_policy_change",
+    "produced": "scaling_policy_change",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Implement predictive auto-scaling with scheduled capacity increases during 10\u201311 AM and 3\u20134 PM weekday windows. Maintain baseline of m5.large \u00d7 6 outside spike windows.\n",
+    "produced": "Replace the fixed 6\u00d7 m5.large fleet with a scheduled auto-scaling group: maintain a baseline of 3\u00d7 m5.large during off-peak hours (weekdays 20:00\u201309:00 UTC and weekends all day), scale to 6\u00d7 m5.large ",
+    "match": false
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "18",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Reduce compute fleet from 5 to 4 t3.medium instances. Do not change instance class. Leave database and network unchanged.\n",
+    "produced": "Reduce the compute fleet from t3.medium \u00d7 5 to t3.medium \u00d7 4 by updating `aws_instance.compute` count from 5 to 4 in main.tf. This is a minor refinement \u2014 the system is mostly well-optimized and only ",
+    "match": true
+  }
+}

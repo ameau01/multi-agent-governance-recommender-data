@@ -1,0 +1,24 @@
+{
+  "scenario_id": "16",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Reduce compute fleet from 4 to 3 m5.large instances. Do not change instance class. Leave database and network unchanged.\n",
+    "produced": "Reduce the compute fleet from 4 \u00d7 m5.large to 3 \u00d7 m5.large by setting count = 3 in the aws_instance.compute resource. Keep the instance class unchanged (m5.large). Do not modify the database (db.r6g.l",
+    "match": true
+  }
+}

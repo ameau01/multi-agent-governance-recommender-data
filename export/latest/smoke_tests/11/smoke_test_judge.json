@@ -1,0 +1,24 @@
+{
+  "scenario_id": "11",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Comprehensive rightsizing: switch compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 6; downsize database from db.r6g.4xlarge to db.r6g.xlarge. Leave network unchanged.\n",
+    "produced": "Right-size compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 6 and database from db.r6g.4xlarge to db.r6g.xlarge. Retain the existing ALB and network tier unchanged, as network throughput and latency are hea",
+    "match": true
+  }
+}

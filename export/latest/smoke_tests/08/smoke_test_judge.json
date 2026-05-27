@@ -1,0 +1,24 @@
+{
+  "scenario_id": "08",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "database",
+    "produced": "database",
+    "match": true
+  },
+  "action_category": {
+    "target": "query_cache_optimization",
+    "produced": "query_cache_optimization",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Optimize the top 6 slowest SQL queries (per top_queries fixture) and add 2 read replicas with read/write splitting.\n",
+    "produced": "Optimize the top 6 slowest SQL queries and add 2 read replicas with read/write splitting. Specifically: (1) Add a composite index (user_id, id) on carts and (cart_id) on cart_items for the carts-by-us",
+    "match": false
+  }
+}

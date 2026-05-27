@@ -1,0 +1,24 @@
+{
+  "scenario_id": "12",
+  "outcome": "pass",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "database",
+    "produced": "database",
+    "match": true
+  },
+  "action_category": {
+    "target": "rightsizing",
+    "produced": "rightsizing",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Downsize database from db.r6g.2xlarge to db.r6g.large. Leave compute tier and read replicas unchanged.\n",
+    "produced": "Downsize the RDS primary instance from db.r6g.2xlarge to db.r6g.large. Leave compute tier (m5.large \u00d7 6 with target-tracking ASG min=6/max=10) completely unchanged \u2014 compute is correctly sized and ope",
+    "match": true
+  }
+}

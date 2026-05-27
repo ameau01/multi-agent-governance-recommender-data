@@ -1,0 +1,24 @@
+{
+  "scenario_id": "07",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "cache",
+    "produced": "cache",
+    "match": true
+  },
+  "action_category": {
+    "target": "query_cache_optimization",
+    "produced": "pool_sizing",
+    "match": false
+  },
+  "specific_change": {
+    "target": "Increase cache cluster from 3 to 6 nodes, implement cache warming logic, and review cache key design for the top 3 most frequent keys (rec:user:*, rec:trending:*, rec:similar:*).\n",
+    "produced": "Scale the Redis cache cluster from 3 to 6 cache.r6g.large nodes to relieve memory pressure (currently 88\u201395% used) and reduce evictions. Implement cache warming logic targeting the three hottest key p",
+    "match": true
+  }
+}

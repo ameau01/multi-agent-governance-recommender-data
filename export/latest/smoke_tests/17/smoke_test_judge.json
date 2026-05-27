@@ -1,0 +1,24 @@
+{
+  "scenario_id": "17",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "diagnostic_deferral",
+    "produced": "diagnostic_deferral",
+    "match": true
+  },
+  "primary_tier": {
+    "target": null,
+    "produced": "compute",
+    "match": false
+  },
+  "action_category": {
+    "target": null,
+    "produced": null,
+    "match": true
+  },
+  "specific_change": {
+    "target": "Recommend full end-to-end distributed trace analysis to identify the actual root cause (candidates include downstream provider latency, shared queue contention, external dependency timeouts, or coordi",
+    "produced": "Defer any scaling, rightsizing, or infrastructure changes until a full end-to-end distributed trace analysis is deployed and analyzed across the compute, database, and network tiers. The simultaneous ",
+    "match": true
+  }
+}

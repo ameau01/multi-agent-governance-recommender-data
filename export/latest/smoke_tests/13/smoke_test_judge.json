@@ -1,0 +1,24 @@
+{
+  "scenario_id": "13",
+  "outcome": "partial",
+  "finding_type": {
+    "target": "issue_found",
+    "produced": "issue_found",
+    "match": true
+  },
+  "primary_tier": {
+    "target": "compute",
+    "produced": "compute",
+    "match": true
+  },
+  "action_category": {
+    "target": "scaling_policy_change",
+    "produced": "scaling_policy_change",
+    "match": true
+  },
+  "specific_change": {
+    "target": "Implement predictive auto-scaling on compute (scale out at cpu_p95 > 65, max 14 instances). Add 2 read replicas with read/write splitting on database. Raise connection pool limit from 150 to 300.\n",
+    "produced": "Replace step scaling with predictive auto-scaling on the compute ASG (trigger scale-out at cpu_p95 > 65%, raise max_size from 12 to 14), add 2 read replicas (db.r6g.xlarge) with read/write splitting t",
+    "match": false
+  }
+}

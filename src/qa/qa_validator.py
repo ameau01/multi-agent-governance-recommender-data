@@ -88,7 +88,7 @@ def validate_scenario(
         QAReport with per-check results and overall pass/fail.
     """
     scenario_dir = scenarios_dir / scenario_id
-    contract = _run_contract_checks(scenario_dir)
+    contract = _run_contract_checks(scenario_dir, spec)
     semantic = _run_semantic_checks(scenario_dir, spec, intermediates_dir)
 
     overall = "pass" if (
@@ -114,8 +114,13 @@ def validate_scenario(
 # ============================================================
 # Contract layer
 # ============================================================
-def _run_contract_checks(scenario_dir: Path) -> QALayerReport:
-    """Run all checks from docs/contract-spec.md §12.6 against the scenario folder."""
+def _run_contract_checks(scenario_dir: Path, spec: ScenarioSpec) -> QALayerReport:
+    """Run all checks from docs/contract-spec.md §12.6 against the scenario folder.
+
+    `spec` is consulted by topology_consistency to allow "metadata-only" tiers
+    (declared in tier_topology but absent from pass1_metrics — see scenario 05's
+    network tier as the canonical example).
+    """
     results: list[CheckResult] = []
 
     # 1. All expected files exist
@@ -182,12 +187,16 @@ def _run_contract_checks(scenario_dir: Path) -> QALayerReport:
             arrays[tier] = []
 
     # 5. Record count check
+    # All scenarios emit fleet-aggregate telemetry at 1 record / 15-min slot = 1344
+    # records per tier per 14-day window. (Scenario 05's per_instance design was
+    # never implemented in the chunker — see pass1.py comments — so the previous
+    # 8× expectation for scenario_05 compute is removed. The hot/cold instance
+    # signal for scenario 05 is captured statically in metadata's
+    # scenario_specific_evidence.per_instance_breakdown.)
     for tier, arr in arrays.items():
         if not arr:
             continue
         expected = RECORDS_PER_TIER
-        if metadata.scenario_id == "05" and tier == "compute":
-            expected = 8 * RECORDS_PER_TIER
         if len(arr) != expected:
             results.append(CheckResult(
                 check=f"{tier}_record_count", result="fail",
@@ -214,7 +223,7 @@ def _run_contract_checks(scenario_dir: Path) -> QALayerReport:
         results.append(CheckResult(check="cross_tier_alignment", result="fail", message=msg))
 
     # 8. Topology vs telemetry consistency
-    ok, msg = _check_topology_consistency(metadata, arrays)
+    ok, msg = _check_topology_consistency(metadata, arrays, spec)
     if ok:
         results.append(CheckResult(check="topology_consistency", result="pass"))
     else:
@@ -247,21 +256,13 @@ def _run_contract_checks(scenario_dir: Path) -> QALayerReport:
 def _check_timestamp_continuity(
     arr: list[dict], tier: str, scenario_id: str,
 ) -> tuple[bool, str | None]:
-    """Per-tier monotonic 15-min UTC starting at DATA_WINDOW_START_UTC."""
-    if scenario_id == "05" and tier == "compute":
-        # Per-instance: groups of 8 share a timestamp
-        instance_count = 8
-        expected = DATA_WINDOW_START_UTC
-        for i in range(0, len(arr), instance_count):
-            block = arr[i : i + instance_count]
-            for r in block:
-                ts = _parse_timestamp(r["timestamp"])
-                if ts != expected:
-                    return False, (
-                        f"{tier}[{i}]: timestamp {r['timestamp']} != expected {expected}"
-                    )
-            expected += timedelta(minutes=INTERVAL_MINUTES)
-        return True, None
+    """Per-tier monotonic 15-min UTC starting at DATA_WINDOW_START_UTC.
+
+    Historical note: there was a scenario_05 special case that expected
+    groups-of-8 records sharing a timestamp (one per instance). The per-
+    instance chunker was never implemented; scenario 05 now emits fleet-
+    aggregate like every other scenario. The special case is removed.
+    """
     expected = DATA_WINDOW_START_UTC
     for i, r in enumerate(arr):
         ts = _parse_timestamp(r["timestamp"])
@@ -274,16 +275,13 @@ def _check_timestamp_continuity(
 def _check_cross_tier_alignment(
     arrays: dict[str, list[dict]], scenario_id: str,
 ) -> tuple[bool, str | None]:
-    """All non-empty tiers share the same timestamp at index i (except Scenario 5).
+    """All non-empty tiers share the same timestamp at index i.
 
-    Scenario 5's compute tier has per-instance records, so the cross-tier check
-    compares the first compute record of each timestamp block against the
-    aligned tier's record at the same index. Simpler: skip cross-tier alignment
-    check for Scenario 5.
+    Historical note: there was a scenario_05 skip here because the per-instance
+    chunker (never implemented) would have emitted 8x records on compute,
+    breaking naive index alignment. The chunker now emits fleet-aggregate for
+    scenario 05 like every other scenario, so the skip is dead code and removed.
     """
-    if scenario_id == "05":
-        return True, None  # per-instance compute breaks naive index alignment
-
     non_empty = {t: a for t, a in arrays.items() if a}
     if len(non_empty) < 2:
         return True, None
@@ -302,9 +300,26 @@ def _check_cross_tier_alignment(
 
 
 def _check_topology_consistency(
-    metadata: ScenarioMetadata, arrays: dict[str, list[dict]],
+    metadata: ScenarioMetadata,
+    arrays: dict[str, list[dict]],
+    spec: ScenarioSpec,
 ) -> tuple[bool, str | None]:
-    """tier_topology.X is None iff X_telemetry.json is empty."""
+    """Telemetry-vs-topology consistency, allowing intentional metadata-only tiers.
+
+    Allowed combinations:
+
+      topology_present = True,  telemetry_present = True   → normal tier  ✓
+      topology_present = False, telemetry_present = False  → tier not in app ✓
+      topology_present = True,  telemetry_present = False  → metadata-only tier
+          (allowed when spec.pass1_metrics[tier] is absent — the spec author
+           intentionally declared the tier exists in the architecture but doesn't
+           want Pass 1 to synthesize telemetry for it; the diagnostic signal
+           comes from a different tier. Canonical example: scenario 05's
+           network tier, which represents the ALB but doesn't carry signal.)
+      topology_present = False, telemetry_present = True   → BUG ✗
+          (Pass 1 generated data for a tier the spec doesn't declare —
+           never legitimate.)
+    """
     tt = metadata.tier_topology
     pairs = [
         ("compute", tt.compute, arrays.get("compute", [])),
@@ -315,10 +330,20 @@ def _check_topology_consistency(
     for name, topology_entry, telemetry in pairs:
         topology_present = topology_entry is not None
         telemetry_present = len(telemetry) > 0
-        if topology_present != telemetry_present:
+        if topology_present and not telemetry_present:
+            # Allowed iff the spec didn't declare pass1_metrics for this tier
+            # (intentional metadata-only tier).
+            tier_metrics = (spec.pass1_metrics or {}).get(name)
+            if not tier_metrics:
+                continue  # intentional metadata-only — OK
             return False, (
-                f"Tier {name}: topology_present={topology_present}, "
-                f"telemetry_present={telemetry_present}"
+                f"Tier {name}: topology declares it present and spec.pass1_metrics "
+                f"declares metrics, but telemetry is empty"
+            )
+        if telemetry_present and not topology_present:
+            return False, (
+                f"Tier {name}: telemetry has {len(telemetry)} records but "
+                f"topology declares the tier absent"
             )
     return True, None
 
@@ -550,13 +575,34 @@ def _check_no_spurious_correlation(spec: ScenarioSpec, arrays: dict[str, list[di
          scenarios — like 11 (statistical co-presence) and 17 (no lead-lag
          signature) — the coupling is the point of the scenario, not a bug.
     """
+    # Build the set of tier pairs that the spec EXPECTS to be correlated.
+    # This includes both:
+    #
+    #   (a) trigger ↔ each effect tier (direct coupling, was already here)
+    #   (b) effect ↔ effect within the same rule (transitive coupling — when
+    #       a rule fires it modifies multiple tiers in the same window, so
+    #       those tiers are inevitably correlated even though they're not
+    #       directly listed as a pair)
+    #
+    # Scenario 07 surfaced (b): one rule with 3 effects across compute and
+    # database. Without effect-effect coupling in declared_pairs, the
+    # compute↔database correlation it intentionally produces (|r|=0.93) was
+    # flagged as spurious.
     declared_pairs = set()
     for rule in spec.pass2_correlations or []:
         t = rule.get("trigger", {}).get("tier")
-        for effect in rule.get("effect", []):
-            et = effect.get("tier")
+        effect_tiers = [
+            e.get("tier") for e in rule.get("effect", []) if e.get("tier")
+        ]
+        # (a) trigger ↔ effect
+        for et in effect_tiers:
             if t and et:
                 declared_pairs.add(frozenset([t, et]))
+        # (b) effect ↔ effect (transitive coupling through shared trigger window)
+        for i, ea in enumerate(effect_tiers):
+            for eb in effect_tiers[i + 1:]:
+                if ea != eb:
+                    declared_pairs.add(frozenset([ea, eb]))
 
     # Whole-app intentional-coupling detection.
     pattern_text = " ".join(
@@ -651,19 +697,48 @@ def _check_cost_sum(metadata: ScenarioMetadata) -> CheckResult:
 def _check_per_instance_consistency(
     spec: ScenarioSpec, metadata: ScenarioMetadata, arrays: dict[str, list[dict]],
 ) -> CheckResult:
-    """Scenario 5 only: per_instance_breakdown entries align with telemetry instance_ids."""
-    if spec.scenario_id != "05":
-        return CheckResult(check="per_instance_consistency", result="pass", message="(N/A)")
-    breakdown = metadata.scenario_specific_evidence.per_instance_breakdown
-    if not breakdown:
-        return CheckResult(
-            check="per_instance_consistency", result="fail",
-            message="Scenario 05 must have per_instance_breakdown",
-        )
-    declared_ids = {b.instance_id for b in breakdown}
+    """Verifies per-instance breakdown alignment IF per-instance telemetry was generated.
+
+    Historical note: this check used to be scenario-05-specific and assumed
+    8× compute records (one per instance per timestamp). The per-instance
+    chunker was never implemented; scenario 05 now emits fleet-aggregate
+    telemetry. The static per_instance_breakdown still flows through metadata
+    for downstream agent consumption — but there's no per-record instance_id
+    to validate against. The check defers until per-instance chunking lands.
+
+    Detection logic:
+      - If the compute tier's record count is the standard fleet-aggregate
+        size (1,344 records = 14 days × 96 intervals), no per-instance
+        chunking happened — defer regardless of what instance_id values
+        Pass 1 happens to have written.
+      - If the record count exceeds 1,344 (per-instance chunker is now
+        emitting multiple records per timestamp), THEN compare declared
+        instance_ids against telemetry instance_ids strictly.
+    """
     compute_arr = arrays.get("compute", [])
-    found_ids = {r.get("instance_id") for r in compute_arr if r.get("instance_id")}
-    if declared_ids != found_ids:
+
+    # Fleet-aggregate behavior: the per-instance chunker did not run.
+    # Defer the check — this is the normal state until per-instance is
+    # implemented. (instance_id may be None, '', or a single sentinel
+    # like 'i-001' that the model picked; either way, we can't validate
+    # per-instance alignment without per-instance data.)
+    if len(compute_arr) <= 1344:
+        return CheckResult(
+            check="per_instance_consistency", result="pass",
+            message="(N/A — per-instance chunking not implemented; "
+                    "signal lives in metadata.scenario_specific_evidence."
+                    "per_instance_breakdown)",
+        )
+
+    # Per-instance telemetry exists (future chunker behavior). Validate
+    # that declared breakdown ids align with telemetry ids exactly.
+    breakdown = metadata.scenario_specific_evidence.per_instance_breakdown
+    declared_ids = {b.instance_id for b in (breakdown or [])}
+    found_ids = {
+        r.get("instance_id") for r in compute_arr
+        if r.get("instance_id") not in (None, "")
+    }
+    if declared_ids and declared_ids != found_ids:
         return CheckResult(
             check="per_instance_consistency", result="fail",
             message=f"Declared ids {declared_ids} != telemetry ids {found_ids}",

@@ -109,10 +109,31 @@ _WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 
 
 def active_tiers(spec: ScenarioSpec) -> list[str]:
-    """Tier names with present=true in the spec, in canonical order."""
+    """Tier names that Pass 1 should generate telemetry for.
+
+    A tier is "active for Pass 1" only when BOTH conditions hold:
+
+      1. `tier_topology.<tier>.present` is True (or unset, which defaults
+         to True per metadata convention). This signals the tier exists
+         in the application architecture.
+
+      2. `pass1_metrics.<tier>` is a non-empty mapping. This signals
+         the spec author wants Pass 1 to synthesize telemetry for it.
+
+    The two conditions can diverge — see scenario 05's network tier:
+    `tier_topology.network.present=True` (the spec is about an ALB, so
+    network exists in the architecture) but `pass1_metrics.network` is
+    absent (the diagnostic signal lives in the compute tier's p50/p95
+    spread, not in network telemetry). In that case Pass 1 should
+    NOT try to generate network data from an empty metric spec —
+    that produces an underspecified prompt that some models respond
+    to with chain-of-thought, breaking the JSON-only contract.
+    """
     return [
         t for t in ("compute", "database", "cache", "network")
         if (entry := spec.tier_topology.get(t)) and entry.get("present", True)
+        and isinstance(spec.pass1_metrics.get(t), dict)
+        and spec.pass1_metrics.get(t)  # non-empty mapping
     ]
 
 

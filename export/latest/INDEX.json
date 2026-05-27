@@ -1,0 +1,552 @@
+{
+  "schema_version": "1.0",
+  "export_mode": "latest",
+  "built_at_utc": "2026-05-27T01:43:27.164576Z",
+  "built_by": "scripts/export_passing_scenarios.sh",
+  "source_repo": "multi-agent-governance-recommender-data",
+  "total_scenarios": 18,
+  "total_records": {
+    "compute": 21504,
+    "database": 18816,
+    "cache": 2688,
+    "network": 12096
+  },
+  "scenarios": [
+    {
+      "id": "01",
+      "name": "Chronic Underutilization",
+      "type": "single_tier_negative",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 500,
+      "monthly_cost_total_usd": 4600.0,
+      "tiers_present": [
+        "compute"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 0,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "02",
+      "name": "Spiky Compute Load",
+      "type": "single_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 300,
+      "monthly_cost_total_usd": 5200.0,
+      "tiers_present": [
+        "compute"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 0,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "03",
+      "name": "Over-provisioned Database",
+      "type": "single_tier_negative",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 800,
+      "monthly_cost_total_usd": 3360.0,
+      "tiers_present": [
+        "database"
+      ],
+      "record_counts": {
+        "compute": 0,
+        "database": 1344,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "04",
+      "name": "Database Connection Bottleneck",
+      "type": "single_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 400,
+      "monthly_cost_total_usd": 2100.0,
+      "tiers_present": [
+        "database"
+      ],
+      "record_counts": {
+        "compute": 0,
+        "database": 1344,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "05",
+      "name": "Load Balancer Inefficiency",
+      "type": "single_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 300,
+      "monthly_cost_total_usd": 3800.0,
+      "tiers_present": [
+        "compute"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 0,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "06",
+      "name": "Healthy Application",
+      "type": "healthy",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 500,
+      "monthly_cost_total_usd": 3900.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "cache",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 1344,
+        "network": 1344
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "07",
+      "name": "Cache Miss Cascade",
+      "type": "cross_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 300,
+      "monthly_cost_total_usd": 5800.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "cache"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 1344,
+        "network": 0
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 3,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": false,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "08",
+      "name": "Database Bottleneck Impact",
+      "type": "cross_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 300,
+      "monthly_cost_total_usd": 6400.0,
+      "tiers_present": [
+        "compute",
+        "database"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 1,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "09",
+      "name": "Peak Hours Cost vs Reliability",
+      "type": "cross_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 250,
+      "monthly_cost_total_usd": 18400.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 2,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "10",
+      "name": "Network Latency Impact",
+      "type": "cross_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 300,
+      "monthly_cost_total_usd": 4100.0,
+      "tiers_present": [
+        "compute",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 0,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 1,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "11",
+      "name": "Multi-Tier Over-provisioning",
+      "type": "cross_tier_negative",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 600,
+      "monthly_cost_total_usd": 11800.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 1,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "12",
+      "name": "Healthy Compute, Problematic Database",
+      "type": "mixed",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 250,
+      "monthly_cost_total_usd": 7200.0,
+      "tiers_present": [
+        "compute",
+        "database"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "13",
+      "name": "Compute Spike + Database Strain",
+      "type": "cross_tier_negative",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 350,
+      "monthly_cost_total_usd": 7800.0,
+      "tiers_present": [
+        "compute",
+        "database"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 0
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 2,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "14",
+      "name": "Good Performance, High Cost",
+      "type": "mixed",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 250,
+      "monthly_cost_total_usd": 14400.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "15",
+      "name": "Reliability Focused Over-provisioning",
+      "type": "mixed",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 200,
+      "monthly_cost_total_usd": 18200.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "fail",
+      "judge_matches": {
+        "finding_type": false,
+        "primary_tier": false,
+        "action_category": false,
+        "specific_change": false
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "16",
+      "name": "Partial Optimization",
+      "type": "single_tier_mild_negative",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 500,
+      "monthly_cost_total_usd": 2400.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "17",
+      "name": "Cross-Tier Performance Degradation",
+      "type": "diagnostic_deferral",
+      "criticality": "tier-1",
+      "sla_target_p95_ms": 400,
+      "monthly_cost_total_usd": 9800.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": true,
+      "correlation_pairs_count": 2,
+      "judge_outcome": "partial",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": false,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    },
+    {
+      "id": "18",
+      "name": "Mostly Healthy with Minor Inefficiency",
+      "type": "mostly_healthy",
+      "criticality": "tier-2",
+      "sla_target_p95_ms": 500,
+      "monthly_cost_total_usd": 1900.0,
+      "tiers_present": [
+        "compute",
+        "database",
+        "network"
+      ],
+      "record_counts": {
+        "compute": 1344,
+        "database": 1344,
+        "cache": 0,
+        "network": 1344
+      },
+      "has_correlation_evidence": false,
+      "correlation_pairs_count": 0,
+      "judge_outcome": "pass",
+      "judge_matches": {
+        "finding_type": true,
+        "primary_tier": true,
+        "action_category": true,
+        "specific_change": true
+      },
+      "refreshed_in_this_run": true
+    }
+  ],
+  "layout": {
+    "scenarios/NN/metadata.json": "Scenario metadata: narrative, business_context, cost_baseline, tier_topology, target_recommendation, evaluation_properties. Validated by contracts.ScenarioMetadata.",
+    "scenarios/NN/main.tf": "Terraform HCL infrastructure definition for the scenario. Defines aws_instance / aws_db_instance / aws_elasticache_cluster / aws_lb resources matching the metadata's tier_topology.",
+    "scenarios/NN/compute_telemetry.json": "1,344 records (14 days \u00d7 96 intervals/day) for compute tier. Validated by contracts.ComputeRecord (array). Empty [] if scenario is not compute-bearing.",
+    "scenarios/NN/database_telemetry.json": "Same as compute_telemetry.json but for database tier. Validated by contracts.DatabaseRecord (array).",
+    "scenarios/NN/cache_telemetry.json": "Same shape for cache tier. Validated by contracts.CacheRecord (array).",
+    "scenarios/NN/network_telemetry.json": "Same shape for network tier. Validated by contracts.NetworkRecord (array).",
+    "scenarios/NN/correlation_evidence.json": "Cross-tier correlation pairs (Pearson coefficient + lag) when the scenario's pass2_correlations rules produce coupling. Empty [] if no correlations apply.",
+    "smoke_tests/NN/smoke_test.json": "Opus rich-schema recommendation (conclusion, evidence, reasoning, projected_state, cost_impact, risk_assessment). Per docs/internal/agent_recommendation_template.md.",
+    "smoke_tests/NN/smoke_test_judge.json": "Haiku LLM-as-judge field-by-field comparison vs the spec's target_recommendation. Pass/partial/fail outcome."
+  },
+  "pydantic_models": {
+    "metadata.json": "contracts.ScenarioMetadata",
+    "compute_telemetry.json": "contracts.ComputeRecord (list)",
+    "database_telemetry.json": "contracts.DatabaseRecord (list)",
+    "cache_telemetry.json": "contracts.CacheRecord (list)",
+    "network_telemetry.json": "contracts.NetworkRecord (list)",
+    "correlation_evidence.json": "contracts.CorrelationPair (list)",
+    "smoke_test.json": "qa.smoke_test.SmokeTestRecommendation",
+    "smoke_test_judge.json": "qa.smoke_test.SmokeTestJudgeResult"
+  },
+  "outcomes_distribution": {
+    "pass": 9,
+    "partial": 8,
+    "fail": 1,
+    "other": 0
+  }
+}
