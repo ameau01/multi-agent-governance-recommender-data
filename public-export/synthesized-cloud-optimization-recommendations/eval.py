@@ -1,14 +1,18 @@
 """Floor sanity check for the synthesized cloud-optimization recommendations dataset.
 
-This is a minimal check. It reads your predictions file and confirms:
+This is a minimal smoke test. It reads your predictions file and confirms:
     1. Each prediction parses as JSON.
     2. Required fields are present.
     3. finding_type is one of the three allowed values.
     4. primary_tier is one of the allowed tier names (or null).
-    5. specific_change is a non-empty string of reasonable length.
+    5. action_category is one of the allowed values.
+    6. specific_change is a non-empty string of reasonable length.
 
-For full Floor + Mid + Rich scoring, see the companion eval-set in the same
-Hugging Face repository.
+This script does NOT score recommendation quality. It only confirms that
+predictions are well-formed and on-topic. For deeper scoring (keyword
+matching, multi-tier reasoning, fixture citations), bring your own
+evaluator that compares each prediction against the
+handcrafted_recommendation.json in the matching scenario folder.
 
 Usage:
     python eval.py --predictions sample_predictions.json
@@ -98,7 +102,7 @@ def main():
     print()
     if total_errors == 0:
         print(f"  All {len(preds)} prediction(s) passed the Floor sanity check.")
-        print("  For full Floor + Mid + Rich scoring, see the companion eval-set.")
+        print("  Quality scoring beyond this is up to you.")
         sys.exit(0)
     else:
         print(f"  {total_errors} problem(s) across the predictions file.")

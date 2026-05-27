@@ -1,8 +1,12 @@
-# eval.py — Floor sanity check
+# eval.py: Floor sanity check
 
-A minimal check. Use this to confirm your predictions parse and have the
-right shape. For full Floor + Mid + Rich scoring, see the companion
-eval-set in the same Hugging Face repository.
+A minimal smoke test. It confirms your predictions parse and have the
+right shape. It does NOT score recommendation quality.
+
+For deeper scoring (keyword matching, multi-tier reasoning, fixture
+citations), bring your own evaluator that compares each prediction
+against the `handcrafted_recommendation.json` in the matching scenario
+folder.
 
 ## Usage
 
@@ -24,13 +28,15 @@ python eval.py --predictions sample_predictions.json
 
 - Whether the recommendation engages with the right evidence.
 - Whether multi-tier scenarios cite both tiers.
-- Whether named fixtures are referenced.
-- Whether cost or projection numbers are present.
+- Whether named fixtures from the metadata are referenced.
+- Whether cost or projection numbers are reasonable.
 
-Those checks live in the companion eval-set.
+Those checks are quality assessments. They depend on what you want to
+score for and how strict you want to be. The dataset ships the gold
+answers; the scoring method is up to you.
 
 ## Exit codes
 
-- `0`: all predictions passed.
+- `0`: all predictions passed the Floor check.
 - `1`: at least one prediction failed at least one check.
 - `2`: usage error (missing file, malformed JSON).
