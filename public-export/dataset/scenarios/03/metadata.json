@@ -1,0 +1,63 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "03",
+  "scenario_name": "Over-provisioned Database",
+  "scenario_type": "single_tier_negative",
+  "narrative": {
+    "what_this_demonstrates": "A database that has been sized for a workload it doesn't have. CPU, connections, and IO wait are all flat low across all 14 days. The fix is a one-step instance-class downgrade.\n",
+    "why_this_scenario_exists": "Tests the Data Layer Analyst's ability to identify database over-provisioning from low-utilization signals across multiple metrics (not just CPU) and ground the recommendation in the current instance class.\n",
+    "what_the_agent_should_conclude": "Downsize the primary RDS instance from db.r6g.xlarge to db.r6g.large and enable storage auto-scaling. Expected savings: $1,680/month.\n",
+    "what_distinguishes_good_from_great": "A good recommendation says \"downsize the database.\" A great recommendation specifies the from→to instance class, adds storage auto-scaling as a secondary improvement, and quotes the expected savings precisely.\n"
+  },
+  "business_context": {
+    "description": "Medium-criticality analytics backend",
+    "sla_target_description": "99.7% availability, P95 < 800ms",
+    "sla_target_p95_ms": 800,
+    "sla_target_availability_pct": 99.7,
+    "criticality": "tier-2"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 3360.0,
+    "by_tier": {
+      "compute": 0.0,
+      "database": 3360.0,
+      "cache": 0.0,
+      "network": 0.0
+    }
+  },
+  "tier_topology": {
+    "compute": null,
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.xlarge",
+      "replicas": 1,
+      "storage_gb": 200
+    },
+    "cache": null,
+    "network": null
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "db.r6g.xlarge with manual storage management",
+    "config_after": "db.r6g.large with storage auto-scaling enabled",
+    "observed_outcome_summary": "db_query_p95_latency_ms stayed under 100ms, db_connections_p95 stayed under 45 (well below new pool ceiling), SLA 99.7% preserved, monthly DB cost dropped by $1,680.\n",
+    "source_attribution": "Pattern observed across analytics-backend cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": false,
+    "primary_specialist_under_test": "data_layer_analyst"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

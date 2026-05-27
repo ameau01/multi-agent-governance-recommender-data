@@ -1,0 +1,46 @@
+{
+  "description": "Slow DB queries cascade into elevated compute latency. Multi-tier reasoning REQUIRED: the recommendation must show the agent recognized BOTH tiers are involved.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "database"
+  ],
+  "secondary_tier_allowed": [
+    "compute",
+    null
+  ],
+  "action_category_allowed": [
+    "query_cache_optimization",
+    "pool_sizing",
+    "replica_adjustment"
+  ],
+  "action_category_rationale": "Three defensible categories: query_cache_optimization (fix the slow queries), pool_sizing (fix the connection bottleneck), replica_adjustment (add read replicas to absorb load).",
+  "action_keyword_groups": [
+    [
+      "optimize",
+      "slow query",
+      "query"
+    ],
+    [
+      "read replica",
+      "replica",
+      "follower"
+    ],
+    [
+      "compute",
+      "application latency",
+      "downstream",
+      "cascade"
+    ]
+  ],
+  "action_keyword_min_match": 2,
+  "multi_tier_evidence": {
+    "must_cite_tiers": [
+      "database",
+      "compute"
+    ],
+    "min_tiers": 2
+  },
+  "must_cite_fixture": "top_queries"
+}

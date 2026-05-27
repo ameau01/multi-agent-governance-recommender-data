@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "11",
+  "scenario_name": "Multi-Tier Over-provisioning",
+  "scenario_type": "cross_tier_negative",
+  "narrative": {
+    "what_this_demonstrates": "An internal analytics platform that has been globally over-provisioned — all three tiers (compute, database, network) sit at low utilization across all 14 days with no spikes. The right action is comprehensive rightsizing across all tiers, not a single-tier adjustment.\n",
+    "why_this_scenario_exists": "Tests the Cross-Tier Evaluator's ability to identify that the issue is global rather than localized, and produce a coordinated multi-tier rightsizing recommendation rather than three independent ones.\n",
+    "what_the_agent_should_conclude": "Comprehensive rightsizing: m5.2xlarge × 12 → m5.large × 6 on compute; db.r6g.4xlarge → db.r6g.xlarge on database. Network unchanged. Projected savings: ~$4,200/month.\n",
+    "what_distinguishes_good_from_great": "A good recommendation rightsizes one tier at a time. A great recommendation coordinates across tiers in a single proposal, quotes the combined savings, and notes that the network tier requires no adjustment.\n"
+  },
+  "business_context": {
+    "description": "Medium-criticality internal analytics platform",
+    "sla_target_description": "99.7% availability, P95 < 600ms",
+    "sla_target_p95_ms": 600,
+    "sla_target_availability_pct": 99.7,
+    "criticality": "tier-2"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 11800.0,
+    "by_tier": {
+      "compute": 6800.0,
+      "database": 4400.0,
+      "cache": 0.0,
+      "network": 600.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.2xlarge",
+      "instance_count": 12,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.4xlarge",
+      "replicas": 1,
+      "storage_gb": 1000
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "round_robin"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.2xlarge × 12 + db.r6g.4xlarge fixed",
+    "config_after": "m5.large × 6 + db.r6g.xlarge",
+    "observed_outcome_summary": "All tiers stayed below 30% utilization, SLA 99.7% preserved, monthly cost dropped by approximately $4,200.\n",
+    "source_attribution": "Pattern observed across analytics-platform cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

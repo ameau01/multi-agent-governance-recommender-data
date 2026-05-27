@@ -1,0 +1,26 @@
+{
+  "description": "Application is mostly healthy with a minor compute inefficiency. Agent should propose a small rightsizing.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "action_category_allowed": [
+    "rightsizing"
+  ],
+  "action_keyword_groups": [
+    [
+      "minor",
+      "modest",
+      "small",
+      "slight"
+    ],
+    [
+      "downsize",
+      "rightsize",
+      "compute"
+    ]
+  ],
+  "action_keyword_min_match": 1
+}

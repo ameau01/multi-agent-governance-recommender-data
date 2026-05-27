@@ -1,0 +1,38 @@
+{
+  "description": "99.99% SLA configured via heavy over-provisioning. Two defensible engineering responses: aggressive ('the SLA itself may be too strict, review with business') or conservative ('defer pending business stakeholder consultation'). Both reach the same operational conclusion: have an SLA-level conversation.",
+  "finding_type_allowed": [
+    "issue_found",
+    "diagnostic_deferral"
+  ],
+  "finding_type_rationale": "The aggressive read says 'this is an issue, review the SLA'. The conservative read says 'defer, need business context'. Both are correct engineering postures.",
+  "primary_tier_allowed": [
+    "compute",
+    "database",
+    "network",
+    null
+  ],
+  "primary_tier_rationale": "For deferral framings, primary_tier may legitimately be null OR the tier with the most over-provisioning.",
+  "action_category_allowed": [
+    "sla_review",
+    null
+  ],
+  "action_keyword_groups": [
+    [
+      "sla",
+      "service level",
+      "availability target",
+      "99.9",
+      "uptime"
+    ],
+    [
+      "review",
+      "discuss",
+      "business",
+      "stakeholder",
+      "negotiate",
+      "confirm",
+      "validate"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

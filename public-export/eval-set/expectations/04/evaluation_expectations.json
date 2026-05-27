@@ -1,0 +1,35 @@
+{
+  "description": "Database under pressure from slow queries + exhausted connection pool. Multiple defensible action categories (query optimization vs pool sizing), both legitimate.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "database"
+  ],
+  "action_category_allowed": [
+    "query_cache_optimization",
+    "pool_sizing"
+  ],
+  "action_category_rationale": "The fix is two-pronged: optimize slow queries AND increase the connection pool. Either action_category framing captures a legitimate primary lens on the problem.",
+  "action_keyword_groups": [
+    [
+      "optimize",
+      "tune",
+      "improve"
+    ],
+    [
+      "slow query",
+      "query",
+      "sql",
+      "index"
+    ],
+    [
+      "connection pool",
+      "pool size",
+      "max_connections",
+      "increase pool"
+    ]
+  ],
+  "action_keyword_min_match": 2,
+  "must_cite_fixture": "top_queries"
+}

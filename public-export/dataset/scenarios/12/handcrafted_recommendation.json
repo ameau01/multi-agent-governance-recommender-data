@@ -1,0 +1,54 @@
+{
+  "scenario_id": "12",
+  "finding_type": "issue_found",
+  "specific_change": "Downsize the RDS primary instance from db.r6g.2xlarge to db.r6g.large. Leave compute tier (m5.large \u00d7 6 with target-tracking ASG min=6/max=10) completely unchanged \u2014 compute is correctly sized and operating in healthy ranges. Update the Terraform aws_db_instance.database_primary instance_class from \"db.r6g.2xlarge\" to \"db.r6g.large\". This yields approximately $1,400/month in savings while preserving the 99.9% SLA.",
+  "primary_tier": "database",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "database",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Downsize database from db.r6g.2xlarge to db.r6g.large \u2014 save ~$1,400/mo"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "DB query P95 latency is 74.5ms (p95 of distribution), well under the 250ms SLA target.",
+      "DB connections P95 peaks at 40, indicating very low connection pressure for a 2xlarge instance.",
+      "DB I/O wait P95 is only 2.9ms, showing negligible storage bottleneck.",
+      "DB cache hit ratio stays above 97% (min 0.97), indicating working set fits comfortably in memory.",
+      "Compute CPU P95 is 77.8% at the 95th percentile of intervals \u2014 healthy utilization, not over-provisioned.",
+      "Compute memory P95 peaks at 71.7%, well within safe operating range.",
+      "Application P95 latency is 181ms at the 95th percentile, comfortably under the 250ms SLA."
+    ],
+    "infrastructure_context": [
+      "Database is db.r6g.2xlarge (8 vCPU, 64 GiB RAM) costing $4,400/mo \u2014 61% of total spend.",
+      "Compute is m5.large \u00d7 6 with ASG target-tracking (min=6, max=10) costing $2,800/mo.",
+      "Database has 500 GB allocated storage with encryption enabled.",
+      "No cache or network tiers are provisioned."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "The database tier consumes 61% of total monthly cost ($4,400 of $7,200) yet shows uniformly low utilization: query latency P95 at 74.5ms, connections peaking at 40, I/O wait under 3ms, and cache hit ratio above 97%. These metrics indicate the db.r6g.2xlarge (8 vCPU, 64 GiB) is significantly over-provisioned. A db.r6g.large (2 vCPU, 16 GiB) provides sufficient headroom given the low connection count and excellent cache hit ratio. Meanwhile, compute telemetry shows CPU P95 at ~78% and memory at ~70% \u2014 healthy utilization that confirms the m5.large \u00d7 6 configuration is correctly sized and must not be changed.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "77-79% (unchanged, compute not modified)",
+    "memory_p95_pct_estimate": "69-72% (unchanged, compute not modified)",
+    "latency_p95_ms_estimate": "75-95ms for DB queries; 180-200ms application P95",
+    "sla_availability_preserved": true,
+    "notes": "DB query latency may increase modestly (~10-20ms) on the smaller instance due to reduced CPU/memory, but remains well within the 250ms SLA budget. The 16 GiB RAM on db.r6g.large is sufficient given the 97%+ cache hit ratio and low connection count."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 7200.0,
+    "projected_monthly_usd": 5800.0,
+    "savings_monthly_usd": 1400.0,
+    "savings_pct": 19.4,
+    "notes": "Database tier drops from ~$4,400/mo (db.r6g.2xlarge) to ~$3,000/mo (db.r6g.large), saving ~$1,400/mo. Compute tier remains at $2,800/mo. Total: $7,200 \u2192 ~$5,800/mo. db.r6g.large on-demand pricing is roughly $0.4128/hr \u00d7 730 hrs \u2248 $3,013/mo vs db.r6g.2xlarge at ~$1.6512/hr \u00d7 730 hrs \u2248 $6,014/mo (list prices; actual $4,400 suggests partial RI/savings plan coverage, so savings may vary)."
+  },
+  "risk_assessment": {
+    "primary_risk": "Reducing from 64 GiB to 16 GiB RAM could degrade cache hit ratio if the working set grows, leading to increased I/O wait and query latency.",
+    "mitigation": "Monitor db_cache_hit_ratio, db_io_wait_p95, and db_query_p95_latency_ms closely for 2 weeks post-change. Set CloudWatch alarms: cache hit ratio < 95%, query P95 > 150ms, I/O wait > 10ms. Schedule the resize during a maintenance window (e.g., Sunday 04:00-06:00 UTC) to minimize user impact during the brief downtime.",
+    "rollback": "Modify the Terraform instance_class back to db.r6g.2xlarge and apply. RDS instance modification with immediate apply takes ~10-15 minutes. No data migration required.",
+    "notes": "Connection limit on db.r6g.large is lower than 2xlarge; verify max_connections parameter group setting accommodates the observed peak of 40 connections (db.r6g.large default is typically ~800, so this is not a concern)."
+  }
+}

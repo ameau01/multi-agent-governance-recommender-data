@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "09",
+  "scenario_name": "Peak Hours Cost vs Reliability",
+  "scenario_type": "cross_tier_negative",
+  "narrative": {
+    "what_this_demonstrates": "A high-criticality e-commerce platform with a clear bimodal weekday pattern: heavy use during peak hours, very light use off-peak and on weekends. Currently provisioned at peak capacity 24/7. Scheduled scaling would dramatically reduce off-peak cost without affecting peak SLA.\n",
+    "why_this_scenario_exists": "Tests cost-vs-reliability trade-off reasoning. The system must recognize that the cost problem is real and the fix preserves reliability — neither blind cost-cutting nor blanket \"this is fine.\"\n",
+    "what_the_agent_should_conclude": "Implement scheduled scaling to reduce capacity by 65% during off-peak hours and weekends while maintaining full capacity during peak windows.\n",
+    "what_distinguishes_good_from_great": "A good recommendation says \"scale down off-peak.\" A great recommendation quantifies the specific off-peak hours, weekends, and percentage capacity reduction, and articulates why this preserves the 99.99% SLA during the peak windows that matter.\n"
+  },
+  "business_context": {
+    "description": "High-criticality e-commerce platform",
+    "sla_target_description": "99.99% availability, P95 < 250ms",
+    "sla_target_p95_ms": 250,
+    "sla_target_availability_pct": 99.99,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 18400.0,
+    "by_tier": {
+      "compute": 11200.0,
+      "database": 6400.0,
+      "cache": 0.0,
+      "network": 800.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.xlarge",
+      "instance_count": 20,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.2xlarge",
+      "replicas": 2,
+      "storage_gb": 1000
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "least_outstanding_requests"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.xlarge × 20 fixed capacity, db.r6g.2xlarge + 2 replicas, no scheduled scaling",
+    "config_after": "Scheduled scaling: peak capacity 9–11 AM and 2–4 PM weekdays only; 65% capacity reduction otherwise",
+    "observed_outcome_summary": "Peak-window SLA stayed at 99.99%. Off-peak cost dropped 65%. Weekends similarly reduced. Total monthly cost dropped by approximately $10,400.\n",
+    "source_attribution": "Pattern observed across e-commerce-platform cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": false,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

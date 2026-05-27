@@ -1,0 +1,99 @@
+{
+  "_note": "This is a sample showing the prediction shape. The content is stub and is not a real recommendation. Replace each prediction with your agent's output.",
+  "predictions": [
+    {
+      "scenario_id": "01",
+      "finding_type": "issue_found",
+      "specific_change": "Sample only \u2014 replace with your agent's recommendation. Must be at least 20 characters.",
+      "primary_tier": "compute",
+      "secondary_tier": null,
+      "action_category": "rightsizing",
+      "conclusion": {
+        "finding_type": "issue_found",
+        "primary_tier": "compute",
+        "secondary_tier": null,
+        "action_category": "rightsizing",
+        "headline": "Sample headline only."
+      },
+      "evidence": {
+        "telemetry_observations": [
+          "Sample telemetry observation."
+        ],
+        "infrastructure_context": [
+          "Sample infrastructure context."
+        ],
+        "correlation_observations": [
+          "Sample correlation observation."
+        ]
+      },
+      "reasoning": "Sample reasoning only. Replace with your agent's reasoning.",
+      "projected_state": {
+        "cpu_p95_pct_estimate": 0,
+        "memory_p95_pct_estimate": 0,
+        "latency_p95_ms_estimate": 0,
+        "sla_availability_preserved": true,
+        "notes": "Sample projected state."
+      },
+      "cost_impact": {
+        "current_monthly_usd": 0,
+        "projected_monthly_usd": 0,
+        "savings_monthly_usd": 0,
+        "savings_pct": 0,
+        "notes": "Sample cost impact."
+      },
+      "risk_assessment": {
+        "primary_risk": "Sample risk.",
+        "mitigation": "Sample mitigation.",
+        "rollback": "Sample rollback plan.",
+        "notes": "Sample risk notes."
+      }
+    },
+    {
+      "scenario_id": "06",
+      "finding_type": "issue_found",
+      "specific_change": "Sample only \u2014 replace with your agent's recommendation. Must be at least 20 characters.",
+      "primary_tier": "compute",
+      "secondary_tier": null,
+      "action_category": "rightsizing",
+      "conclusion": {
+        "finding_type": "issue_found",
+        "primary_tier": "compute",
+        "secondary_tier": null,
+        "action_category": "rightsizing",
+        "headline": "Sample headline only."
+      },
+      "evidence": {
+        "telemetry_observations": [
+          "Sample telemetry observation."
+        ],
+        "infrastructure_context": [
+          "Sample infrastructure context."
+        ],
+        "correlation_observations": [
+          "Sample correlation observation."
+        ]
+      },
+      "reasoning": "Sample reasoning only. Replace with your agent's reasoning.",
+      "projected_state": {
+        "cpu_p95_pct_estimate": 0,
+        "memory_p95_pct_estimate": 0,
+        "latency_p95_ms_estimate": 0,
+        "sla_availability_preserved": true,
+        "notes": "Sample projected state."
+      },
+      "cost_impact": {
+        "current_monthly_usd": 0,
+        "projected_monthly_usd": 0,
+        "savings_monthly_usd": 0,
+        "savings_pct": 0,
+        "notes": "Sample cost impact."
+      },
+      "risk_assessment": {
+        "primary_risk": "Sample risk.",
+        "mitigation": "Sample mitigation.",
+        "rollback": "Sample rollback plan.",
+        "notes": "Sample risk notes."
+      }
+    }
+  ]
+}

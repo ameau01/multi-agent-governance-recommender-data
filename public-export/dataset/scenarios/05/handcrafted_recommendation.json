@@ -1,0 +1,53 @@
+{
+  "scenario_id": "05",
+  "finding_type": "issue_found",
+  "specific_change": "Reconfigure the ALB target group (app05-tg) load-balancing algorithm from round_robin to least_outstanding_requests. No capacity change is needed \u2014 the existing 8 \u00d7 c5.xlarge fleet is sufficient. In Terraform, set `load_balancing_algorithm_type = \"least_outstanding_requests\"` on the `aws_lb_target_group.main` resource.",
+  "primary_tier": "network",
+  "secondary_tier": "compute",
+  "action_category": "load_balancer_reconfiguration",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "network",
+    "secondary_tier": "compute",
+    "action_category": "load_balancer_reconfiguration",
+    "headline": "Switch ALB from round_robin to least_outstanding_requests to fix instance imbalance"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Cluster CPU p95 is 90.1% (p50) reaching 94.0% (p95), indicating hot instances near saturation.",
+      "Application p95 latency median is 277ms with p95 at 334ms, breaching the 300ms SLA target.",
+      "CPU p50-to-p95 spread is ~10 percentage points (81.1 vs 90.1), signaling uneven distribution.",
+      "Memory p95 is moderate at 60.2% (p50), confirming this is not a memory-bound problem.",
+      "Network I/O stddev is ~21 Mbps, consistent with uneven request routing across instances."
+    ],
+    "infrastructure_context": [
+      "ALB target group (app05-tg) uses load_balancing_algorithm_type = round_robin.",
+      "Fleet is 8 \u00d7 c5.xlarge with no auto-scaling policy configured.",
+      "Per-instance breakdown shows a clear 50/50 hot/cold split across the fleet."
+    ],
+    "correlation_observations": [
+      "Instances i-001 through i-004 sustain 78-88% CPU (hot) while i-005 through i-008 sustain 8-18% CPU (cold), a ~70 percentage-point variance caused by round-robin ignoring request duration."
+    ]
+  },
+  "reasoning": "The per-instance breakdown reveals a stark bimodal CPU distribution: instances i-001 through i-004 run at 78-88% while i-005 through i-008 idle at 8-18%. This pattern is characteristic of round-robin routing with variable request durations \u2014 some instances accumulate long-running requests while others finish quickly and sit idle. The cluster-level p95 latency of 334ms breaches the 300ms SLA because the hot instances are saturated. Switching to least_outstanding_requests will route new connections to the instance with the fewest in-flight requests, naturally balancing load regardless of request duration. Adding capacity would not fix the root cause \u2014 half the fleet would remain underutilized.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "45-55%",
+    "memory_p95_pct_estimate": "~60%",
+    "latency_p95_ms_estimate": "200-240",
+    "sla_availability_preserved": true,
+    "notes": "With even distribution across 8 instances, per-instance CPU should converge near the fleet average (~48%). P95 latency should drop well below the 300ms SLA threshold as no instance is saturated."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 3800.0,
+    "projected_monthly_usd": 3800.0,
+    "savings_monthly_usd": 0.0,
+    "savings_pct": 0.0,
+    "notes": "This is a configuration change, not a capacity change \u2014 no cost delta. However, once load is balanced, the fleet-wide CPU should settle around 45-55%, which may later enable downsizing from 8 to 6 instances (~$950/mo savings). Validate post-change utilization before pursuing that optimization."
+  },
+  "risk_assessment": {
+    "primary_risk": "Transient connection redistribution during the target group algorithm change may cause brief latency spikes as in-flight requests on hot instances drain.",
+    "mitigation": "Apply the change during a low-traffic window (weekdays 04:00-06:00 UTC based on typical API gateway patterns). Monitor per-instance CPU variance and p95 latency for 30 minutes post-change; alert if any instance exceeds 75% CPU or p95 exceeds 300ms.",
+    "rollback": "Revert `load_balancing_algorithm_type` to `round_robin` in Terraform and apply. The change is instantaneous on the ALB and does not require instance restarts.",
+    "notes": "least_outstanding_requests is well-supported on AWS ALBs and is the recommended algorithm for workloads with variable request durations."
+  }
+}

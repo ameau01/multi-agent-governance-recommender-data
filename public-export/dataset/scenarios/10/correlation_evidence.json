@@ -1,0 +1,12 @@
+[
+  {
+    "tier_a": "network",
+    "tier_b": "compute",
+    "metric_a": "network_p95_latency_ms",
+    "metric_b": "application_p95_latency_ms",
+    "coefficient": 0.976,
+    "lag_minutes": 0,
+    "alignment_score": 0.975,
+    "description": "must hold on all 10 weekday dates during business hours"
+  }
+]

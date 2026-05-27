@@ -1,0 +1,41 @@
+{
+  "description": "Compute spike during business hours strains database. Multi-tier reasoning REQUIRED: agent should address both tiers (scaling policy on compute, replica or pool change on database).",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "secondary_tier_allowed": [
+    "database",
+    null
+  ],
+  "action_category_allowed": [
+    "scaling_policy_change",
+    "rightsizing",
+    "replica_adjustment"
+  ],
+  "action_category_rationale": "Three defensible framings of the multi-tier fix: scheduled scaling on compute, raw rightsizing, or adding DB read replicas.",
+  "action_keyword_groups": [
+    [
+      "scheduled scaling",
+      "auto-scaling",
+      "scale up",
+      "rightsize"
+    ],
+    [
+      "database",
+      "db",
+      "read replica",
+      "replica"
+    ]
+  ],
+  "action_keyword_min_match": 2,
+  "multi_tier_evidence": {
+    "must_cite_tiers": [
+      "compute",
+      "database"
+    ],
+    "min_tiers": 2
+  }
+}

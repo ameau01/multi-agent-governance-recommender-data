@@ -1,0 +1,55 @@
+{
+  "scenario_id": "11",
+  "finding_type": "issue_found",
+  "specific_change": "Right-size compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 6 and database from db.r6g.4xlarge to db.r6g.xlarge. Retain the existing ALB and network tier unchanged, as network throughput and latency are healthy. This coordinated multi-tier downsize yields ~$4,200/month savings while preserving the 99.7% SLA.",
+  "primary_tier": "compute",
+  "secondary_tier": "database",
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": "database",
+    "action_category": "rightsizing",
+    "headline": "Coordinated compute+database rightsizing saves ~$4,200/mo (36%)"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Compute CPU p95 peaked at 28.0% with a mean of 24.2% over 14 days \u2014 well below 50% threshold.",
+      "Compute memory p95 peaked at 32.0% with a mean of 26.4% \u2014 significant headroom remains.",
+      "Application p95 latency peaked at 175ms, far below the 600ms SLA target.",
+      "Database query p95 latency peaked at 89.8ms with mean 58.7ms \u2014 no pressure.",
+      "Database connections p95 peaked at 55, mean 36 \u2014 a db.r6g.xlarge can handle this comfortably.",
+      "Database IO wait p95 peaked at 4.0ms \u2014 negligible disk pressure.",
+      "Network error rate p95 is 0.4% and throughput is well within ALB capacity."
+    ],
+    "infrastructure_context": [
+      "Compute tier runs 12 \u00d7 m5.2xlarge (8 vCPU, 32 GiB each) with no auto-scaling policy.",
+      "Database is a single db.r6g.4xlarge (16 vCPU, 128 GiB) with 1 TB storage and no read replicas.",
+      "ALB uses round_robin across all 12 compute instances."
+    ],
+    "correlation_observations": [
+      "Compute cpu_p95 and database db_connections_p95 show Pearson r=0.83 at lag 0 min, confirming simultaneous low utilization across tiers rather than load shifting."
+    ]
+  },
+  "reasoning": "All three tiers have been consistently under-utilized for the entire 14-day observation window with no spikes or diurnal patterns. The cross-tier correlation (r=0.83, zero lag) confirms that compute and database load move together and are both uniformly low, ruling out intermittent bursts that one tier absorbs while the other idles. Downsizing compute from m5.2xlarge \u00d7 12 to m5.large \u00d7 6 reduces vCPU from 96 to 12 and memory from 384 GiB to 48 GiB; even at peak observed utilization (~28% CPU, ~32% memory), the new fleet provides ample headroom. Similarly, moving the database from db.r6g.4xlarge to db.r6g.xlarge reduces vCPU from 16 to 4 and memory from 128 GiB to 32 GiB, which is sufficient given peak connections of 55 and sub-90ms query latency. The network tier requires no change as ALB costs are modest and throughput is healthy.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "45-55%",
+    "memory_p95_pct_estimate": "50-65%",
+    "latency_p95_ms_estimate": "160-220",
+    "sla_availability_preserved": true,
+    "notes": "Estimates assume linear scaling of utilization with reduced capacity. 6 \u00d7 m5.large provides 12 vCPU / 48 GiB; current peak load used ~27 vCPU-equivalent and ~123 GiB-equivalent, but actual working set is much smaller given low utilization. P95 latency may increase modestly but stays well within the 600ms SLA."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 11800.0,
+    "projected_monthly_usd": 7600.0,
+    "savings_monthly_usd": 4200.0,
+    "savings_pct": 35.6,
+    "notes": "Compute: m5.2xlarge ($0.384/hr) \u00d7 12 \u00d7 730 = ~$3,364/mo \u2192 m5.large ($0.096/hr) \u00d7 6 \u00d7 730 = ~$420/mo, saving ~$2,944. Database: db.r6g.4xlarge (~$2.77/hr) \u00d7 730 = ~$2,022/mo \u2192 db.r6g.xlarge (~$0.69/hr) \u00d7 730 = ~$504/mo, saving ~$1,518. Combined savings ~$4,462; rounded to ~$4,200 accounting for associated costs. Network tier ($600/mo) unchanged."
+  },
+  "risk_assessment": {
+    "primary_risk": "Reducing compute from 12 to 6 instances halves redundancy; a simultaneous failure of 2+ instances could degrade availability below the 99.7% SLA target.",
+    "mitigation": "Implement an ASG with min=4, desired=6, max=10 using CPU target-tracking at 60%. Add CloudWatch alarms on p95 latency > 400ms and CPU > 70% to trigger scale-out before SLA breach. Run the downsized configuration in parallel (blue/green) for 48 hours before cutting over.",
+    "rollback": "Revert the Terraform instance_type and count to m5.2xlarge \u00d7 12 and database to db.r6g.4xlarge. With IaC this is a single terraform apply taking ~10 minutes for compute and ~15 minutes for the RDS modification.",
+    "notes": "Stage the change: downsize compute first, observe for one week, then downsize database. This limits blast radius and provides a clean signal if latency regresses."
+  }
+}

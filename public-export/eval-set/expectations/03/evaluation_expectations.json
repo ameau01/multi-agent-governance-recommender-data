@@ -1,0 +1,28 @@
+{
+  "description": "Database is provisioned far above its actual load, agent should recommend database rightsizing.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "database"
+  ],
+  "action_category_allowed": [
+    "rightsizing"
+  ],
+  "action_keyword_groups": [
+    [
+      "downsize",
+      "rightsize",
+      "smaller instance",
+      "scale down"
+    ],
+    [
+      "database",
+      "db",
+      "rds",
+      "db.r",
+      "db.m"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

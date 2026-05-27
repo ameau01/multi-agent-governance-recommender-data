@@ -1,0 +1,27 @@
+{
+  "description": "Every tier is healthy. Agent must recognize no action is needed (restraint test).",
+  "finding_type_allowed": [
+    "no_issue_found"
+  ],
+  "primary_tier_allowed": [
+    null
+  ],
+  "action_category_allowed": [
+    null
+  ],
+  "action_keyword_groups": [
+    [
+      "no action",
+      "no change",
+      "no issue",
+      "no recommendation",
+      "no modification",
+      "no adjustment",
+      "operating in healthy",
+      "correctly sized",
+      "healthy",
+      "well-provisioned"
+    ]
+  ],
+  "action_keyword_min_match": 1
+}

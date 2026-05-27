@@ -1,0 +1,27 @@
+{
+  "description": "Compute has a partial optimization opportunity while other tiers are fine. Agent should rightsize compute.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "action_category_allowed": [
+    "rightsizing",
+    "scaling_policy_change"
+  ],
+  "action_keyword_groups": [
+    [
+      "downsize",
+      "rightsize",
+      "scale down",
+      "reduce"
+    ],
+    [
+      "compute",
+      "m5.large",
+      "m5.xlarge"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

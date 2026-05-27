@@ -1,0 +1,38 @@
+{
+  "description": "All three tiers (compute, database, network) are over-provisioned. Multi-tier reasoning REQUIRED: agent must rightsize all three, not just one.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute",
+    "database",
+    "network"
+  ],
+  "primary_tier_rationale": "All three tiers are over-provisioned simultaneously; any of the three can be defensibly framed as primary depending on which has the largest absolute over-provisioning.",
+  "action_category_allowed": [
+    "rightsizing"
+  ],
+  "action_keyword_groups": [
+    [
+      "downsize",
+      "rightsize",
+      "right-size",
+      "scale down",
+      "reduce"
+    ],
+    [
+      "m5.large",
+      "smaller instance",
+      "fewer instance"
+    ]
+  ],
+  "action_keyword_min_match": 2,
+  "multi_tier_evidence": {
+    "must_cite_tiers": [
+      "compute",
+      "database",
+      "network"
+    ],
+    "min_tiers": 3
+  }
+}

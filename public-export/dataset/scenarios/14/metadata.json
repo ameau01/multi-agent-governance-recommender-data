@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "14",
+  "scenario_name": "Good Performance, High Cost",
+  "scenario_type": "mixed",
+  "narrative": {
+    "what_this_demonstrates": "A checkout flow whose latency and error metrics are excellent — well inside SLA — but utilization is far below the healthy band on both compute and database. The system is over-provisioned to deliver performance that exceeds requirements. Right action is to rightsize while preserving the SLA buffer.\n",
+    "why_this_scenario_exists": "Tests cost-vs-performance trade-off reasoning. The metrics look \"good\" on the surface (latency is fine); a naive agent might recommend no change. A sophisticated agent recognizes excess capacity even when everything is \"working.\"\n",
+    "what_the_agent_should_conclude": "Right-size compute (m5.2xlarge × 12 → m5.large × 8) and database (db.r6g.4xlarge → db.r6g.xlarge). Leave read replicas and network unchanged. Expected savings ~$5,500/month with no latency degradation.\n",
+    "what_distinguishes_good_from_great": "A good recommendation rightsizes. A great recommendation explicitly notes that the SLA buffer is preserved and that replicas/network are untouched because they contribute to the reliability posture that matters here.\n"
+  },
+  "business_context": {
+    "description": "High-criticality checkout flow",
+    "sla_target_description": "99.9% availability, P95 < 250ms",
+    "sla_target_p95_ms": 250,
+    "sla_target_availability_pct": 99.9,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 14400.0,
+    "by_tier": {
+      "compute": 7200.0,
+      "database": 5400.0,
+      "cache": 0.0,
+      "network": 1800.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.2xlarge",
+      "instance_count": 12,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.4xlarge",
+      "replicas": 2,
+      "storage_gb": 1000
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "least_outstanding_requests"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.2xlarge × 12 + db.r6g.4xlarge + 2 read replicas + PrivateLink",
+    "config_after": "m5.large × 8 + db.r6g.xlarge + 2 read replicas (unchanged) + PrivateLink (unchanged)",
+    "observed_outcome_summary": "application_p95_latency_ms stayed in 110–180ms band (well inside SLA), error rates unchanged, monthly cost dropped approximately 38% (~$5,500/month savings).\n",
+    "source_attribution": "Pattern observed across checkout-flow cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": true,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

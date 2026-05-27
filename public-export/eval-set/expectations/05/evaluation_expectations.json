@@ -1,0 +1,34 @@
+{
+  "description": "ALB using round-robin distribution causing uneven CPU across instances. Both 'compute' and 'network' are defensible primary_tier, ALB is conventionally network infrastructure, but the symptom surfaces in compute.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute",
+    "network"
+  ],
+  "primary_tier_rationale": "ALB classification is a known ambiguity in cloud taxonomy: aws_lb is in the network AWS service family, but the diagnostic signal (uneven per-instance CPU) lives in the compute tier.",
+  "action_category_allowed": [
+    "load_balancer_reconfiguration"
+  ],
+  "action_keyword_groups": [
+    [
+      "least_outstanding_requests",
+      "least-outstanding-requests",
+      "least outstanding",
+      "least-conn"
+    ],
+    [
+      "round_robin",
+      "round-robin",
+      "round robin"
+    ],
+    [
+      "alb",
+      "application load balancer",
+      "target group",
+      "load balancer"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

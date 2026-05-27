@@ -1,0 +1,29 @@
+{
+  "description": "Compute is correctly sized; database is over-provisioned. Agent should rightsize ONLY the database (must not recommend compute changes).",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "database"
+  ],
+  "action_category_allowed": [
+    "rightsizing",
+    "pool_sizing"
+  ],
+  "action_category_rationale": "Database rightsizing is the canonical fix; pool_sizing is defensible if framed as a connection-pool tuning.",
+  "action_keyword_groups": [
+    [
+      "downsize",
+      "rightsize",
+      "scale down",
+      "smaller"
+    ],
+    [
+      "database",
+      "db.r",
+      "db.m",
+      "rds"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

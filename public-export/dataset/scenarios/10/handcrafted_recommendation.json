@@ -1,0 +1,52 @@
+{
+  "scenario_id": "10",
+  "finding_type": "issue_found",
+  "specific_change": "Replace basic VPC peering for the payment-provider integration with AWS PrivateLink to eliminate cross-region latency spikes during business hours (weekdays 09:00\u201318:00 UTC). Add application-level retries with exponential backoff (initial 100ms, max 3 retries, 2\u00d7 multiplier, jitter) to the payment-provider client. Do not scale compute \u2014 CPU and memory are correctly sized; the bottleneck is at the network boundary, not the compute tier.",
+  "primary_tier": "network",
+  "secondary_tier": "compute",
+  "action_category": "network_topology_change",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "network",
+    "secondary_tier": "compute",
+    "action_category": "network_topology_change",
+    "headline": "Switch payment-provider link to PrivateLink + add retries to fix SLA breach"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "Network p95 latency spikes to 233.7ms (p95) with max 239.6ms, vs p50 of 52.9ms.",
+      "Application p95 latency reaches 1015.1ms (p95) and max 1069.8ms, far exceeding the 300ms SLA target.",
+      "Network error rate peaks at 0.015 (p95: 0.013), well above the baseline 0.001 min.",
+      "Compute CPU p95 is 67.7% and memory p95 is 61.2% \u2014 both within healthy ranges.",
+      "Application latency stddev is 344ms, indicating extreme variance tied to business-hour spikes."
+    ],
+    "infrastructure_context": [
+      "Payment-provider integration uses basic VPC peering with no retry policy configured.",
+      "Compute is m5.large \u00d7 6 with ASG range 6\u201310; CPU/memory headroom confirms correct sizing."
+    ],
+    "correlation_observations": [
+      "Network p95 latency and application p95 latency show Pearson coefficient 0.976 at 0-minute lag, confirming network is the direct cause of application latency spikes."
+    ]
+  },
+  "reasoning": "The near-perfect correlation (r=0.976, zero lag) between network_p95_latency_ms and application_p95_latency_ms proves that application latency spikes are a direct pass-through of network latency, not a compute resource issue. CPU p95 at 67.7% and memory p95 at 61.2% confirm compute is adequately sized \u2014 scaling instances would not address the root cause. The basic VPC peering path to the payment provider introduces variable cross-region latency that spikes during business hours, pushing application p95 to over 1000ms against a 300ms SLA target. Switching to AWS PrivateLink provides a dedicated, low-latency private path, and adding retries with exponential backoff handles transient failures gracefully without cascading into application errors.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "60-68%",
+    "memory_p95_pct_estimate": "52-62%",
+    "latency_p95_ms_estimate": "200-220",
+    "sla_availability_preserved": true,
+    "notes": "Based on before/after evidence from payment-service cohort: network p95 drops below 80ms during business hours, application p95 drops below 220ms, network error rate drops below 0.002. Compute metrics unchanged as they are not the bottleneck."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 4100.0,
+    "projected_monthly_usd": 4250.0,
+    "savings_monthly_usd": -150.0,
+    "savings_pct": -3.66,
+    "notes": "PrivateLink endpoint costs ~$7.30/mo (0.01/hr \u00d7 730 hrs) plus ~$0.01/GB data processing. Estimated net cost increase of ~$100\u2013$200/mo for the PrivateLink endpoint and data charges, offset by elimination of SLA breach risk on a tier-1 payment service. No compute savings expected \u2014 compute is correctly sized. The small cost increase is justified by bringing application p95 from >1000ms to <220ms and preserving 99.9% SLA."
+  },
+  "risk_assessment": {
+    "primary_risk": "PrivateLink endpoint availability becomes a single point of failure for payment-provider connectivity; if the endpoint service is misconfigured or the provider doesn't support PrivateLink, the migration could cause downtime.",
+    "mitigation": "Deploy PrivateLink endpoints in both AZs (subnet-a and subnet-b) for redundancy. Validate provider PrivateLink support before migration. Monitor endpoint state via CloudWatch VPC endpoint metrics. Keep VPC peering route as a fallback during the transition period.",
+    "rollback": "Revert DNS/routing to use the original VPC peering path. The peering connection should remain active during the transition window (recommend 2-week parallel operation) to enable instant rollback.",
+    "notes": "Retry policy should include circuit-breaker logic to prevent retry storms during sustained provider outages. Set retry budget to cap at 10% of total requests."
+  }
+}

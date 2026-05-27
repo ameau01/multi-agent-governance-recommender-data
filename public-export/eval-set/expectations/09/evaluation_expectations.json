@@ -1,0 +1,35 @@
+{
+  "description": "Bimodal peak/off-peak weekday pattern on multi-tier app. Agent should recommend scheduled scaling for off-peak cost reduction.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "action_category_allowed": [
+    "scaling_policy_change",
+    "rightsizing"
+  ],
+  "action_category_rationale": "Scheduled scaling is the canonical fix; static rightsizing is also defensible if the agent prefers a simpler intervention.",
+  "action_keyword_groups": [
+    [
+      "scheduled scaling",
+      "predictive scaling",
+      "time-based",
+      "schedule-based",
+      "scheduled action",
+      "auto-scaling"
+    ],
+    [
+      "off-peak",
+      "off-hours",
+      "off peak",
+      "weekend"
+    ],
+    [
+      "weekday",
+      "weekend"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

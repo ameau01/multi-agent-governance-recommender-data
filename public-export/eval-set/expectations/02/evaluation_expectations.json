@@ -1,0 +1,43 @@
+{
+  "description": "Compute fleet with predictable daily peak windows, agent should recommend scheduled/predictive scaling, not raw rightsizing.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "action_category_allowed": [
+    "scaling_policy_change"
+  ],
+  "action_keyword_groups": [
+    [
+      "scheduled scaling",
+      "scheduled auto-scaling",
+      "scheduled action",
+      "predictive scaling",
+      "predictive auto-scaling",
+      "schedule-based",
+      "time-based scaling",
+      "auto scaling group",
+      "asg"
+    ],
+    [
+      "peak",
+      "spike",
+      "business hours",
+      "10:00",
+      "10-14",
+      "14:00",
+      "daily peak",
+      "peak hours"
+    ],
+    [
+      "increase capacity",
+      "scale up",
+      "additional capacity",
+      "more instances",
+      "burst"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

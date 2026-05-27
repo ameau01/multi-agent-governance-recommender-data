@@ -1,0 +1,36 @@
+{
+  "description": "Cache hit ratio degraded, cascading to database+compute. The fix involves cache scaling AND warming logic. Both 'query_cache_optimization' (deep) and 'pool_sizing' (surface) framings are defensible.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "cache"
+  ],
+  "action_category_allowed": [
+    "query_cache_optimization",
+    "pool_sizing"
+  ],
+  "action_category_rationale": "Both framings capture a legitimate lens: query_cache_optimization emphasizes the root cause (cache miss patterns); pool_sizing emphasizes the implementation (scaling cluster nodes). Acceptable either way.",
+  "action_keyword_groups": [
+    [
+      "cache",
+      "elasticache",
+      "redis"
+    ],
+    [
+      "scale",
+      "increase",
+      "add nodes",
+      "add cluster",
+      "more nodes"
+    ],
+    [
+      "warming",
+      "warm",
+      "key design",
+      "cache key",
+      "hit ratio"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}

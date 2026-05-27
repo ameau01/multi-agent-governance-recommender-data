@@ -1,0 +1,51 @@
+{
+  "scenario_id": "04",
+  "finding_type": "issue_found",
+  "specific_change": "Optimize the top 5 slowest queries: (1) add index on users(email) for the email-lookup query (820ms p95), (2) add index on sessions(token, expires_at) for the session-token query (640ms p95), (3) add composite index on profiles(user_id) and ensure covering columns for the users-profiles join query (510ms p95), (4) add composite index on audit_log(created_at, user_id) for the audit-log join query (480ms p95), (5) materialize or cache the recursive permissions CTE query (410ms p95). Increase the connection pool from 100 to 200 to eliminate pool exhaustion during business hours (weekdays 09:00\u201318:00 UTC). Add 2 read replicas (db.r6g.large) with read/write splitting to offload the high-volume read queries (sessions at 7.4M calls, users-by-email at 4.7M calls).",
+  "primary_tier": "database",
+  "secondary_tier": null,
+  "action_category": "query_cache_optimization",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "database",
+    "secondary_tier": null,
+    "action_category": "query_cache_optimization",
+    "headline": "Optimize 5 slow queries, double pool to 200, add 2 read replicas \u2014 fix SLA breach"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "db_query_p95_latency_ms p95 is 618.7ms, exceeding the 400ms SLA target.",
+      "db_query_p95_latency_ms max reaches 649.1ms with stddev of 199ms, indicating severe business-hours spikes.",
+      "db_connections_p95 peaks at 180, exceeding the configured pool limit of 100.",
+      "db_connections_p95 p95 is 179, showing near-constant pool saturation during peak windows.",
+      "db_io_wait_p95 spikes to 22ms (p95: 21.3ms), correlating with query latency spikes."
+    ],
+    "infrastructure_context": [
+      "Single db.r6g.large primary with no read replicas defined in Terraform.",
+      "Connection pool configured at 100 \u2014 no headroom for business-hours demand reaching 180 connections.",
+      "No indexes or query optimization infrastructure visible in the Terraform definition."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "The telemetry shows two compounding problems: connection pool exhaustion (p95 connections at 179 against a pool ceiling of 100) and slow queries driving p95 latency to 619ms \u2014 well above the 400ms SLA. The top queries by volume (sessions token lookup at 7.4M calls, users email lookup at 4.7M calls) lack apparent indexing and are likely table-scanning, which both inflates latency and holds connections open longer, creating a feedback loop. Doubling the pool to 200 provides immediate headroom, but without query optimization the underlying cause persists. Adding 2 read replicas with R/W splitting offloads the dominant read workload and provides redundancy, while targeted indexing on the five identified queries addresses the root latency problem.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "~40-55%",
+    "memory_p95_pct_estimate": null,
+    "latency_p95_ms_estimate": "150-220ms",
+    "sla_availability_preserved": true,
+    "notes": "Based on before/after evidence: query optimization + replicas dropped p95 from 350-650ms to under 220ms. Connection p95 expected to stay under 130, well within new pool of 200."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 2100.0,
+    "projected_monthly_usd": 4400.0,
+    "savings_monthly_usd": -2300.0,
+    "savings_pct": -109.5,
+    "notes": "Cost increases due to 2 additional db.r6g.large read replicas (~$1,050/mo each based on current primary cost of ~$2,100/mo for primary). Total: $2,100 (primary) + $2,100 (2 replicas) + ~$200 (additional I/O) \u2248 $4,400/mo. This is a reliability/performance investment \u2014 the alternative is continued SLA breach at 618ms p95 against a 400ms target."
+  },
+  "risk_assessment": {
+    "primary_risk": "Replication lag on read replicas could serve stale data for latency-sensitive queries like session token validation, causing auth inconsistencies.",
+    "mitigation": "Route session-token and permissions queries to the primary (write path) initially; monitor replica lag with a 100ms alarm threshold. Gradually shift read traffic once lag is confirmed stable under 50ms.",
+    "rollback": "Remove read replicas from Terraform, revert pool to 100, and remove R/W splitting configuration. Index additions are non-destructive and can remain in place.",
+    "notes": "Query index additions carry minimal risk \u2014 test on a replica first. Pool increase from 100 to 200 may require verifying max_connections on the db.r6g.large (typically ~1,600 for this class)."
+  }
+}

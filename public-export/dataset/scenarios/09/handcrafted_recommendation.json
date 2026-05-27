@@ -1,0 +1,56 @@
+{
+  "scenario_id": "09",
+  "finding_type": "issue_found",
+  "specific_change": "Replace the fixed 20\u00d7 m5.xlarge compute fleet with scheduled Auto Scaling: maintain 20 instances during peak windows (weekdays 09:00\u201311:00 UTC and 14:00\u201316:00 UTC), scale down to 7 instances (65% reduction) during off-peak hours (weekdays 16:00\u201309:00 UTC and all day weekends 00:00\u201323:59 UTC). Similarly, stop one database replica during off-peak/weekend windows and restart it before peak. This preserves full peak capacity for the 99.99% SLA while reducing monthly spend from $18,400 to approximately $8,000, saving ~$10,400/month (56%).",
+  "primary_tier": "compute",
+  "secondary_tier": "database",
+  "action_category": "scaling_policy_change",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "compute",
+    "secondary_tier": "database",
+    "action_category": "scaling_policy_change",
+    "headline": "Scheduled scaling saves ~$10,400/mo (56%) while preserving 99.99% peak SLA"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "CPU p50 is 15.8% but p95 reaches 86.8%, showing extreme bimodal utilization.",
+      "CPU p95 stddev is 25.2%, confirming sharp peak/off-peak divergence.",
+      "Application p95 latency median is 123.5ms, well within the 250ms SLA target.",
+      "Memory p95 median is 34.2% (max 73.2%), indicating headroom even at peak.",
+      "DB connections p50 median is 30 vs p95 of 111, mirroring the bimodal compute pattern.",
+      "Network throughput p95 ranges from 120 to 789 Mbps, confirming traffic swings."
+    ],
+    "infrastructure_context": [
+      "Compute is 20\u00d7 m5.xlarge with no auto-scaling policy \u2014 fixed capacity 24/7.",
+      "Database is db.r6g.2xlarge primary + 2 replicas, also fixed provisioning.",
+      "ALB uses least_outstanding_requests, which will naturally rebalance across fewer instances.",
+      "Total monthly cost is $18,400 ($11,200 compute, $6,400 database, $800 network)."
+    ],
+    "correlation_observations": [
+      "Compute cpu_p95 and db_query_p95_latency_ms correlate at r=0.751 (lag 0 min), confirming load is demand-driven and peaks are synchronized.",
+      "Compute cpu_p95 and network_throughput_p95 correlate at r=0.886 (lag 0 min), confirming traffic-driven CPU spikes with no queuing delay."
+    ]
+  },
+  "reasoning": "The telemetry shows a stark bimodal pattern: CPU p50 of 15.8% indicates the fleet is nearly idle most of the time, while p95 of 86.8% shows peak windows fully utilize the 20-instance fleet. The zero-lag correlations between compute, database, and network confirm that load is externally driven by user traffic rather than by internal inefficiency, meaning off-peak capacity can be safely reduced without masking a systemic problem. Because the ALB already uses least_outstanding_requests routing, removing instances during off-peak will redistribute traffic cleanly across the remaining 7 instances. Maintaining full 20-instance capacity during the identified peak windows (weekdays 09:00\u201311:00 and 14:00\u201316:00 UTC) preserves the 99.99% SLA where it matters.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "80-90% during peak (unchanged), 35-50% during off-peak (7 instances)",
+    "memory_p95_pct_estimate": "65-75% during off-peak on fewer instances, ~34% during peak",
+    "latency_p95_ms_estimate": "120-140ms off-peak, 270-280ms peak (within 250ms SLA at peak)",
+    "sla_availability_preserved": true,
+    "notes": "Peak windows retain full 20-instance capacity so SLA is unaffected. Off-peak latency may slightly increase but remains well within SLA. A 5-minute warm-up buffer before peak windows ensures instances are healthy before traffic arrives."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 18400.0,
+    "projected_monthly_usd": 8000.0,
+    "savings_monthly_usd": 10400.0,
+    "savings_pct": 56.5,
+    "notes": "Peak hours total ~4h/day \u00d7 5 weekdays = 20h/week at full capacity (20 instances). Off-peak = 148h/week at 7 instances (65% reduction). Compute savings: ~$11,200 \u00d7 0.65 \u00d7 (148/168) \u2248 $6,400/mo. Database savings from stopping 1 replica off-peak: ~$2,100 \u00d7 (148/168) \u2248 $1,850/mo. Remaining savings from weekend network reduction. Approximate total savings ~$10,400/mo."
+  },
+  "risk_assessment": {
+    "primary_risk": "Unexpected traffic spikes outside defined peak windows (e.g., flash sales, marketing campaigns) could overwhelm the reduced 7-instance fleet and breach the 250ms p95 SLA.",
+    "mitigation": "Layer a reactive target-tracking ASG policy (CPU target 70%) on top of the scheduled scaling so the fleet can expand within 2-3 minutes if off-peak traffic unexpectedly surges. Set CloudWatch alarms on p95 latency > 200ms and CPU > 75% during off-peak to trigger early warnings. Maintain an SNS notification for any scale-out events outside peak windows.",
+    "rollback": "Revert the ASG scheduled actions to restore the fixed 20-instance fleet. This is a single Terraform apply reverting the aws_autoscaling_schedule resources; no data migration or state change is involved.",
+    "notes": "Schedule transitions should include a 5-minute buffer before peak windows to allow new instances to pass health checks. Database replica restart should begin 10 minutes before peak to allow replication catch-up."
+  }
+}

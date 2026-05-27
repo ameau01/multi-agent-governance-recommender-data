@@ -1,0 +1,74 @@
+{
+  "contract_version": "1.0.0",
+  "scenario_id": "15",
+  "scenario_name": "Reliability Focused Over-provisioning",
+  "scenario_type": "mixed",
+  "narrative": {
+    "what_this_demonstrates": "A payment-processing platform configured for 99.99% SLA via heavy over-provisioning across all tiers and multi-AZ redundancy. Achieves near-zero error rate at substantial cost. The right next step is a business-context question, not a technical rightsizing.\n",
+    "why_this_scenario_exists": "Tests business-context reasoning. The correct first move is to ask whether the 99.99% target is actually required by the business, or whether 99.95% is acceptable. If 99.95% is acceptable, then significant rightsizing follows; if 99.99% is required, the current posture is defensible.\n",
+    "what_the_agent_should_conclude": "Surface the SLA-vs-cost trade-off as a business-context question first. If 99.95% is acceptable, right-size all tiers for ~$8,200/month savings while keeping error rate below 0.01%.\n",
+    "what_distinguishes_good_from_great": "A good recommendation rightsizes. A great recommendation refuses to rightsize without first surfacing the SLA question — recognizing that over-provisioning for 99.99% is technically wasteful but may be business-correct.\n"
+  },
+  "business_context": {
+    "description": "High-criticality payment processing platform",
+    "sla_target_description": "99.99% availability, P95 < 200ms",
+    "sla_target_p95_ms": 200,
+    "sla_target_availability_pct": 99.99,
+    "criticality": "tier-1"
+  },
+  "cost_baseline": {
+    "monthly_cost_total_usd": 18200.0,
+    "by_tier": {
+      "compute": 9600.0,
+      "database": 6400.0,
+      "cache": 0.0,
+      "network": 2200.0
+    }
+  },
+  "tier_topology": {
+    "compute": {
+      "present": true,
+      "instance_class": "m5.xlarge",
+      "instance_count": 16,
+      "scaling_policy": "none",
+      "auto_scaling_min": null,
+      "auto_scaling_max": null
+    },
+    "database": {
+      "present": true,
+      "instance_class": "db.r6g.2xlarge",
+      "replicas": 3,
+      "storage_gb": 1000
+    },
+    "cache": null,
+    "network": {
+      "present": true,
+      "load_balancer_type": "application",
+      "algorithm": "least_outstanding_requests"
+    }
+  },
+  "scenario_specific_evidence": {
+    "top_queries": [],
+    "top_cache_keys": [],
+    "per_instance_breakdown": []
+  },
+  "before_after_evidence": {
+    "config_before": "m5.xlarge × 16 + db.r6g.2xlarge + 3 read replicas in 3 AZs + multi-AZ PrivateLink (99.99% SLA target)",
+    "config_after": "Right-sized to 99.95% target across all tiers (replicas reduced to 2, compute reduced to m5.large × 10)",
+    "observed_outcome_summary": "network_error_rate stayed below 0.01% (well within the 99.95% envelope), application_p95_latency_ms stayed below 200ms, monthly cost dropped by approximately $8,200.\n",
+    "source_attribution": "Pattern observed across payment-processing cohort during Q4 2025."
+  },
+  "evaluation_properties": {
+    "exercises_restraint": true,
+    "exercises_diagnostic_deferral": false,
+    "exercises_cross_tier_synthesis": true,
+    "primary_specialist_under_test": "cross_tier_evaluator"
+  },
+  "telemetry_file_pointers": {
+    "compute": "compute_telemetry.json",
+    "database": "database_telemetry.json",
+    "cache": "cache_telemetry.json",
+    "network": "network_telemetry.json"
+  },
+  "infrastructure_file": "main.tf"
+}

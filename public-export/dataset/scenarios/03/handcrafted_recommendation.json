@@ -1,0 +1,50 @@
+{
+  "scenario_id": "03",
+  "finding_type": "issue_found",
+  "specific_change": "Downsize the primary RDS instance from db.r6g.xlarge (4 vCPU, 32 GiB RAM) to db.r6g.large (2 vCPU, 16 GiB RAM) and enable storage auto-scaling on the 200 GB volume. This halves the database compute cost, saving approximately $1,680/month (50% reduction). Update the Terraform resource aws_db_instance.database_primary by setting instance_class to \"db.r6g.large\" and adding max_allocated_storage = 500 to enable storage auto-scaling.",
+  "primary_tier": "database",
+  "secondary_tier": null,
+  "action_category": "rightsizing",
+  "conclusion": {
+    "finding_type": "issue_found",
+    "primary_tier": "database",
+    "secondary_tier": null,
+    "action_category": "rightsizing",
+    "headline": "Downsize db.r6g.xlarge \u2192 db.r6g.large and enable storage auto-scaling; save 50%"
+  },
+  "evidence": {
+    "telemetry_observations": [
+      "db_query_p95_latency_ms p95 is 80.9ms \u2014 well under the 800ms SLA target.",
+      "db_connections_p95 peaks at 35, with a mean of 26 \u2014 far below xlarge connection limits.",
+      "db_io_wait_p95 peaks at 4.0ms with a mean of 2.36ms \u2014 negligible I/O pressure.",
+      "db_cache_hit_ratio stays above 95.6% (mean 97.4%) \u2014 buffer pool is oversized for the workload.",
+      "All metrics show low stddev, indicating flat, stable utilization across the full 14-day window."
+    ],
+    "infrastructure_context": [
+      "Primary RDS instance is db.r6g.xlarge (4 vCPU, 32 GiB RAM) at $3,360/month.",
+      "Storage is manually provisioned at 200 GB with no auto-scaling configured (no max_allocated_storage)."
+    ],
+    "correlation_observations": []
+  },
+  "reasoning": "Every utilization signal \u2014 query latency, connection count, I/O wait, and cache hit ratio \u2014 is flat and low across the entire 14-day window, indicating the db.r6g.xlarge instance is substantially over-provisioned. The p95 query latency of 80.9ms leaves a 10\u00d7 margin to the 800ms SLA, and peak connections of 35 are well within the limits of a db.r6g.large. Downsizing to db.r6g.large halves the vCPU and memory, which the workload clearly does not need, while enabling storage auto-scaling removes the operational risk of manual storage management as data grows.",
+  "projected_state": {
+    "cpu_p95_pct_estimate": "~20-35%",
+    "memory_p95_pct_estimate": "~40-55%",
+    "latency_p95_ms_estimate": "85-110",
+    "sla_availability_preserved": true,
+    "notes": "With half the memory, buffer pool will be smaller but cache hit ratio should remain above 95% given the modest working set. Latency may increase slightly but will stay far below the 800ms SLA threshold."
+  },
+  "cost_impact": {
+    "current_monthly_usd": 3360.0,
+    "projected_monthly_usd": 1680.0,
+    "savings_monthly_usd": 1680.0,
+    "savings_pct": 50.0,
+    "notes": "db.r6g.xlarge on-demand is ~$0.4608/hr \u00d7 730 hrs \u2248 $336.38/mo per instance; with 1 replica the total is ~$3,360/mo. db.r6g.large is ~$0.2304/hr \u00d7 730 hrs \u2248 $168.19/mo per instance; total ~$1,680/mo. Savings = $1,680/mo. Storage costs remain unchanged."
+  },
+  "risk_assessment": {
+    "primary_risk": "Unexpected workload spikes (e.g., batch analytics jobs or seasonal traffic) could push the smaller instance closer to resource limits, potentially increasing query latency.",
+    "mitigation": "Set CloudWatch alarms on CPUUtilization > 70%, FreeableMemory < 2 GiB, and DatabaseConnections > 80. Monitor db_query_p95_latency_ms for two weeks post-change. Enable Enhanced Monitoring at 15-second granularity during the transition period.",
+    "rollback": "Modify the RDS instance class back to db.r6g.xlarge via Terraform apply. The change requires a brief maintenance window (~5-10 min downtime) but is fully reversible with no data impact.",
+    "notes": "Schedule the instance modification during a low-traffic maintenance window (e.g., Sunday 04:00-06:00 UTC) to minimize user impact from the required reboot."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "description": "All three tiers' latency rises simultaneously with no clear lead-lag. The agent MUST recognize this is diagnostic deferral, instrumentation is needed before any infrastructure change is safe.",
+  "finding_type_allowed": [
+    "diagnostic_deferral"
+  ],
+  "primary_tier_allowed": [
+    "compute",
+    "database",
+    "network",
+    null
+  ],
+  "primary_tier_rationale": "On a deferral case, primary_tier may be null OR a leading hypothesis. Either is acceptable since the whole point is the agent hasn't committed to a diagnosis yet.",
+  "action_category_allowed": [
+    null
+  ],
+  "action_keyword_groups": [
+    [
+      "distributed trace",
+      "trace analysis",
+      "observability",
+      "instrumentation",
+      "tracing",
+      "additional"
+    ],
+    [
+      "root cause",
+      "cause",
+      "diagnose"
+    ],
+    [
+      "simultaneous",
+      "lockstep",
+      "all three",
+      "all tier",
+      "co-presence",
+      "no lead-lag",
+      "no clear"
+    ]
+  ],
+  "action_keyword_min_match": 2,
+  "multi_tier_evidence": {
+    "must_cite_tiers": [
+      "compute",
+      "database",
+      "network"
+    ],
+    "min_tiers": 3
+  }
+}

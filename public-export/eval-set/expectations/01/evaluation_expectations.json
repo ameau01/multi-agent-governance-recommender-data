@@ -1,0 +1,32 @@
+{
+  "description": "Chronic underutilization of a fixed compute fleet, agent should recognize over-provisioning and recommend rightsizing.",
+  "finding_type_allowed": [
+    "issue_found"
+  ],
+  "primary_tier_allowed": [
+    "compute"
+  ],
+  "action_category_allowed": [
+    "rightsizing"
+  ],
+  "action_keyword_groups": [
+    [
+      "downsize",
+      "rightsize",
+      "right-size",
+      "scale down",
+      "reduce instance"
+    ],
+    [
+      "t3.medium",
+      "smaller",
+      "fewer"
+    ],
+    [
+      "replica",
+      "instance count",
+      "instance size"
+    ]
+  ],
+  "action_keyword_min_match": 2
+}
